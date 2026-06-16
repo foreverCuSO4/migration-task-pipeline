@@ -30,3 +30,6 @@ archives/
 *.swp
 *.swo
 
+# privacy
+auth.json
+
