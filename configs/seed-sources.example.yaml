@@ -5,6 +5,19 @@
 
 pypi:
   enabled: true
+  # auto backend tries BigQuery first and then falls back to these HTTP packages
+  # when BigQuery credentials are unavailable.
+  packages:
+    - torch
+    - pytorch-lightning
+    - tensorflow
+    - jax
+    - triton
+    - transformers
+    - accelerate
+    - torchvision
+    - torch-geometric
+    - mace-torch
   keywords:
     - torch
     - pytorch
@@ -33,6 +46,33 @@ conda_forge:
     - molecular
     - distributed
 
+github_search:
+  enabled: false
+  # GitHub search is a repo discovery source, not a package-ecosystem source.
+  # Keep this conservative because GitHub Search API has low per-minute limits.
+  per_page: 50
+  max_pages_per_query: 1
+  sort: stars
+  order: desc
+  extra_qualifiers:
+    - archived:false
+    - fork:false
+    - stars:>=10
+    - pushed:>=2024-01-01
+  keywords:
+    - torch
+    - pytorch
+    - cuda
+    - triton
+    - machine learning
+    - deep learning
+    - vision
+    - graph
+    - molecular
+    - simulation
+    - distributed
+    - transformer
+
 github_url_normalization:
   canonical_form: "https://github.com/<owner>/<repo>"
   strip_suffixes:
@@ -42,4 +82,3 @@ github_url_normalization:
     - pulls
     - tree
     - blob
-

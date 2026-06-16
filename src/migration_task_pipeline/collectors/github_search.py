@@ -1,0 +1,107 @@
+"""GitHub repository search collector."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Iterable
+
+from ..config import GitHubSearchConfig
+from ..github_metadata import GitHubClient, github_api_payload_to_metadata
+from ..github_urls import normalize_github_url
+from ..keywords import match_keywords
+
+
+def collect_github_search_records(
+    config: GitHubSearchConfig,
+    client: GitHubClient,
+    *,
+    collected_at: str | None = None,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Search GitHub repositories and convert results into seed records."""
+    collected_at = collected_at or datetime.now(UTC).isoformat()
+    raw_rows = list(search_github_repositories(config, client))
+    return raw_rows, rows_to_seed_records(raw_rows, config.keywords, collected_at)
+
+
+def search_github_repositories(
+    config: GitHubSearchConfig,
+    client: GitHubClient,
+) -> Iterable[dict[str, object]]:
+    for keyword in config.keywords:
+        query = _build_query(keyword, config.extra_qualifiers)
+        for page in range(1, config.max_pages_per_query + 1):
+            payload = client.search_repositories(
+                query,
+                per_page=config.per_page,
+                page=page,
+                sort=config.sort,
+                order=config.order,
+            )
+            for item in payload.get("items") or []:
+                row = dict(item)
+                row["search_keyword"] = keyword
+                row["search_query"] = query
+                row["source_record_id"] = f"github-search:{item.get('full_name', '')}"
+                yield row
+
+
+def rows_to_seed_records(
+    raw_rows: Iterable[dict[str, object]],
+    keywords: list[str],
+    collected_at: str,
+) -> list[dict[str, object]]:
+    records = []
+    for row in raw_rows:
+        html_url = str(row.get("html_url") or "")
+        normalized = normalize_github_url(html_url)
+        if normalized is None:
+            continue
+
+        topics = row.get("topics") or []
+        matched_keywords = match_keywords(
+            [
+                row.get("name"),
+                row.get("full_name"),
+                row.get("description"),
+                " ".join(str(topic) for topic in topics),
+                row.get("search_keyword"),
+                row.get("search_query"),
+            ],
+            keywords,
+        )
+        if not matched_keywords:
+            matched_keywords = [str(row.get("search_keyword") or "").strip()]
+        matched_keywords = [keyword for keyword in matched_keywords if keyword]
+
+        license_info = row.get("license") or {}
+        if not isinstance(license_info, dict):
+            license_info = {}
+        github_metadata = github_api_payload_to_metadata(row)
+        records.append(
+            {
+                "source": "github-search",
+                "package_name": "",
+                "package_version": "",
+                "repo_url": normalized.repo_url,
+                "homepage": row.get("homepage") or html_url,
+                "summary": row.get("description", ""),
+                "keywords": ";".join(str(topic) for topic in topics if topic),
+                "license": license_info.get("spdx_id") or license_info.get("key") or "",
+                "downloads_30d": "",
+                "collected_at": collected_at,
+                "source_record_id": row.get("source_record_id") or f"github-search:{normalized.repo_key}",
+                "repo_owner": normalized.owner,
+                "repo_name": normalized.repo,
+                "repo_key": normalized.repo_key,
+                "url_extract_field": "html_url",
+                "matched_keywords": matched_keywords,
+                **github_metadata,
+            }
+        )
+    return records
+
+
+def _build_query(keyword: str, extra_qualifiers: list[str]) -> str:
+    parts = [keyword.strip()]
+    parts.extend(qualifier.strip() for qualifier in extra_qualifiers if qualifier.strip())
+    return " ".join(part for part in parts if part)

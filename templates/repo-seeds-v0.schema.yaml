@@ -1,0 +1,37 @@
+name: repo-seeds-v0
+format: csv
+missing_value: ""
+columns:
+  - source
+  - package_name
+  - package_version
+  - repo_url
+  - homepage
+  - summary
+  - keywords
+  - license
+  - downloads_30d
+  - collected_at
+  - source_record_id
+  - repo_owner
+  - repo_name
+  - repo_key
+  - url_extract_field
+  - matched_keywords
+  - sources
+  - package_names
+  - licenses
+  - homepage_candidates
+  - source_count
+  - github_stars
+  - github_forks
+  - github_archived
+  - github_is_fork
+  - github_license
+  - github_default_branch
+  - github_pushed_at
+  - github_size_kb
+  - github_topics
+  - github_primary_language
+  - github_metadata_error
+
