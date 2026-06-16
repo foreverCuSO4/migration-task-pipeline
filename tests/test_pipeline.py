@@ -3,7 +3,11 @@ from migration_task_pipeline.pipeline import run_seed_collector_v0
 
 
 class FakeGitHubClient:
+    def __init__(self, events=None):
+        self.events = events if events is not None else []
+
     def get_repo_metadata(self, repo_key):
+        self.events.append(f"enrich:{repo_key}")
         return {
             "github_stars": 20,
             "github_forks": 1,
@@ -23,63 +27,37 @@ class FakeGitHubClient:
 
 
 def test_pipeline_writes_expected_artifacts(tmp_path, monkeypatch):
-    def fake_pypi(config, *, backend, collected_at, session=None):
-        return (
-            [{"name": "demo", "version": "1.0"}],
-            [
-                {
-                    "source": "pypi",
-                    "package_name": "demo",
-                    "package_version": "1.0",
-                    "repo_url": "https://github.com/Owner/Repo",
-                    "homepage": "https://github.com/Owner/Repo",
-                    "summary": "CUDA package",
-                    "keywords": "cuda",
-                    "license": "MIT",
-                    "downloads_30d": 1200,
-                    "collected_at": collected_at,
-                    "source_record_id": "pypi:demo",
-                    "repo_owner": "Owner",
-                    "repo_name": "Repo",
-                    "repo_key": "owner/repo",
-                    "url_extract_field": "project_urls.Source",
-                    "matched_keywords": ["cuda"],
-                }
-            ],
-            "http-curated",
-        )
+    def fake_pypi_raw_rows(config, backend, backend_state):
+        backend_state["value"] = "http-curated"
+        yield {
+            "name": "demo",
+            "version": "1.0",
+            "summary": "CUDA package",
+            "keywords": "cuda",
+            "home_page": "https://github.com/Owner/Repo",
+        }
 
-    def fake_conda(config, *, collected_at, session=None):
-        return ([], [])
+    def fake_conda_raw_rows(config):
+        return iter(())
 
-    def fake_github_search(config, client, *, collected_at):
-        return (
-            [{"full_name": "Search/Repo"}],
-            [
-                {
-                    "source": "github-search",
-                    "package_name": "",
-                    "package_version": "",
-                    "repo_url": "https://github.com/Search/Repo",
-                    "homepage": "https://github.com/Search/Repo",
-                    "summary": "CUDA search result",
-                    "keywords": "cuda",
-                    "license": "MIT",
-                    "downloads_30d": "",
-                    "collected_at": collected_at,
-                    "source_record_id": "github-search:Search/Repo",
-                    "repo_owner": "Search",
-                    "repo_name": "Repo",
-                    "repo_key": "search/repo",
-                    "url_extract_field": "html_url",
-                    "matched_keywords": ["cuda"],
-                }
-            ],
-        )
+    def fake_github_search_raw_rows(config, client):
+        yield {
+            "name": "Repo",
+            "full_name": "Search/Repo",
+            "html_url": "https://github.com/Search/Repo",
+            "description": "CUDA search result",
+            "topics": ["cuda"],
+            "license": {"spdx_id": "MIT"},
+            "stargazers_count": 20,
+            "archived": False,
+            "fork": False,
+            "pushed_at": "2026-06-01T00:00:00Z",
+            "size": 100,
+        }
 
-    monkeypatch.setattr("migration_task_pipeline.pipeline.collect_pypi_records", fake_pypi)
-    monkeypatch.setattr("migration_task_pipeline.pipeline.collect_conda_forge_records", fake_conda)
-    monkeypatch.setattr("migration_task_pipeline.pipeline.collect_github_search_records", fake_github_search)
+    monkeypatch.setattr("migration_task_pipeline.pipeline._iter_pypi_raw_rows", fake_pypi_raw_rows)
+    monkeypatch.setattr("migration_task_pipeline.pipeline.fetch_conda_repodata", fake_conda_raw_rows)
+    monkeypatch.setattr("migration_task_pipeline.pipeline.search_github_repositories", fake_github_search_raw_rows)
 
     outputs = run_seed_collector_v0(
         SeedConfig(
@@ -96,6 +74,7 @@ def test_pipeline_writes_expected_artifacts(tmp_path, monkeypatch):
     assert outputs.raw_candidate_count == 2
     assert outputs.normalized_count == 2
     assert outputs.processed_count == 2
+    assert outputs.pypi_backend_used == "http-curated"
     assert outputs.processed_csv.read_text(encoding="utf-8").splitlines()[0].startswith(
         "source,package_name,package_version,repo_url"
     )
@@ -105,3 +84,48 @@ def test_pipeline_writes_expected_artifacts(tmp_path, monkeypatch):
     assert (tmp_path / "interim" / "repo-urls-normalized-20260616.csv").exists()
     assert (tmp_path / "interim" / "github-metadata-20260616.jsonl").exists()
     assert (tmp_path / "processed" / "repo-seeds-v0.csv").exists()
+
+
+def test_pipeline_enriches_each_candidate_before_collecting_next_raw_row(tmp_path, monkeypatch):
+    events = []
+
+    def fake_pypi_raw_rows(config, backend, backend_state):
+        backend_state["value"] = "http-curated"
+        events.append("raw:first")
+        yield {
+            "name": "first",
+            "version": "1.0",
+            "summary": "CUDA package",
+            "keywords": "cuda",
+            "home_page": "https://github.com/Owner/First",
+        }
+        events.append("raw:second")
+        yield {
+            "name": "second",
+            "version": "1.0",
+            "summary": "CUDA package",
+            "keywords": "cuda",
+            "home_page": "https://github.com/Owner/Second",
+        }
+
+    monkeypatch.setattr("migration_task_pipeline.pipeline._iter_pypi_raw_rows", fake_pypi_raw_rows)
+
+    run_seed_collector_v0(
+        SeedConfig(
+            pypi=PyPIConfig(enabled=True),
+            conda_forge=CondaForgeConfig(enabled=False),
+            github_search=GitHubSearchConfig(enabled=False),
+        ),
+        output_root=tmp_path,
+        run_date="20260616",
+        pypi_backend="http-curated",
+        github_client=FakeGitHubClient(events),
+    )
+
+    assert events == [
+        "raw:first",
+        "enrich:owner/first",
+        "raw:second",
+        "enrich:owner/second",
+    ]
+

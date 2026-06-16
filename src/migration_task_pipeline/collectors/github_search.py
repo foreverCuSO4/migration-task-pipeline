@@ -52,53 +52,61 @@ def rows_to_seed_records(
 ) -> list[dict[str, object]]:
     records = []
     for row in raw_rows:
-        html_url = str(row.get("html_url") or "")
-        normalized = normalize_github_url(html_url)
-        if normalized is None:
-            continue
-
-        topics = row.get("topics") or []
-        matched_keywords = match_keywords(
-            [
-                row.get("name"),
-                row.get("full_name"),
-                row.get("description"),
-                " ".join(str(topic) for topic in topics),
-                row.get("search_keyword"),
-                row.get("search_query"),
-            ],
-            keywords,
-        )
-        if not matched_keywords:
-            matched_keywords = [str(row.get("search_keyword") or "").strip()]
-        matched_keywords = [keyword for keyword in matched_keywords if keyword]
-
-        license_info = row.get("license") or {}
-        if not isinstance(license_info, dict):
-            license_info = {}
-        github_metadata = github_api_payload_to_metadata(row)
-        records.append(
-            {
-                "source": "github-search",
-                "package_name": "",
-                "package_version": "",
-                "repo_url": normalized.repo_url,
-                "homepage": row.get("homepage") or html_url,
-                "summary": row.get("description", ""),
-                "keywords": ";".join(str(topic) for topic in topics if topic),
-                "license": license_info.get("spdx_id") or license_info.get("key") or "",
-                "downloads_30d": "",
-                "collected_at": collected_at,
-                "source_record_id": row.get("source_record_id") or f"github-search:{normalized.repo_key}",
-                "repo_owner": normalized.owner,
-                "repo_name": normalized.repo,
-                "repo_key": normalized.repo_key,
-                "url_extract_field": "html_url",
-                "matched_keywords": matched_keywords,
-                **github_metadata,
-            }
-        )
+        record = raw_row_to_seed_record(row, keywords, collected_at)
+        if record is not None:
+            records.append(record)
     return records
+
+
+def raw_row_to_seed_record(
+    row: dict[str, object],
+    keywords: list[str],
+    collected_at: str,
+) -> dict[str, object] | None:
+    html_url = str(row.get("html_url") or "")
+    normalized = normalize_github_url(html_url)
+    if normalized is None:
+        return None
+
+    topics = row.get("topics") or []
+    matched_keywords = match_keywords(
+        [
+            row.get("name"),
+            row.get("full_name"),
+            row.get("description"),
+            " ".join(str(topic) for topic in topics),
+            row.get("search_keyword"),
+            row.get("search_query"),
+        ],
+        keywords,
+    )
+    if not matched_keywords:
+        matched_keywords = [str(row.get("search_keyword") or "").strip()]
+    matched_keywords = [keyword for keyword in matched_keywords if keyword]
+
+    license_info = row.get("license") or {}
+    if not isinstance(license_info, dict):
+        license_info = {}
+    github_metadata = github_api_payload_to_metadata(row)
+    return {
+        "source": "github-search",
+        "package_name": "",
+        "package_version": "",
+        "repo_url": normalized.repo_url,
+        "homepage": row.get("homepage") or html_url,
+        "summary": row.get("description", ""),
+        "keywords": ";".join(str(topic) for topic in topics if topic),
+        "license": license_info.get("spdx_id") or license_info.get("key") or "",
+        "downloads_30d": "",
+        "collected_at": collected_at,
+        "source_record_id": row.get("source_record_id") or f"github-search:{normalized.repo_key}",
+        "repo_owner": normalized.owner,
+        "repo_name": normalized.repo,
+        "repo_key": normalized.repo_key,
+        "url_extract_field": "html_url",
+        "matched_keywords": matched_keywords,
+        **github_metadata,
+    }
 
 
 def _build_query(keyword: str, extra_qualifiers: list[str]) -> str:

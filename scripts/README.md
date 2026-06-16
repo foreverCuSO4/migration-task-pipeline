@@ -35,6 +35,11 @@ The search results already include common GitHub metadata, so the enrichment
 step reuses complete `github_*` fields and skips an extra `/repos/<owner>/<repo>`
 request for those rows.
 
+The collector runs as a serial streaming pipeline: each raw source record is
+written, converted to a seed candidate, deduplicated, enriched, and filtered
+before the next raw record is processed. Final CSV files are written as a
+snapshot after all enabled sources finish so aggregate fields remain complete.
+
 The pipeline writes raw package metadata to `data/raw/`, normalized repository
 URLs to `data/interim/`, GitHub metadata to `data/interim/`, and the final seed
 table to `data/processed/repo-seeds-v0.csv`.
