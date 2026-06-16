@@ -45,7 +45,11 @@ def dedupe_seed_records(records: Iterable[dict[str, object]]) -> list[dict[str, 
             for keyword in _split_values(record.get("matched_keywords"))
         )
         homepage_candidates = _sorted_unique(record.get("homepage") for record in group)
-        downloads = [_to_int(record.get("downloads_30d")) for record in group]
+        downloads = [
+            _to_int(record.get("downloads_30d"))
+            for record in group
+            if csv_value(record.get("downloads_30d"))
+        ]
 
         row.update(
             {

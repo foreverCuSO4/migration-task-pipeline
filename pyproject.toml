@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Seed collection and filtering pipeline for accelerator migration tasks."
 requires-python = ">=3.11"
 dependencies = [
-  "google-cloud-bigquery>=3.20",
   "PyYAML>=6.0",
   "requests>=2.31",
 ]
@@ -17,4 +16,3 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
-

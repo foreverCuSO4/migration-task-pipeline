@@ -33,28 +33,8 @@ DEFAULT_KEYWORDS = [
 
 
 @dataclass(frozen=True)
-class PyPIConfig:
-    enabled: bool = True
-    keywords: list[str] = field(default_factory=lambda: list(DEFAULT_KEYWORDS))
-    packages: list[str] = field(default_factory=list)
-    bigquery_project: str | None = None
-    bigquery_dataset: str = "bigquery-public-data.pypi.distribution_metadata"
-    bigquery_downloads_table: str = "bigquery-public-data.pypi.file_downloads"
-    bigquery_limit: int | None = None
-    http_limit: int | None = None
-
-
-@dataclass(frozen=True)
-class CondaForgeConfig:
-    enabled: bool = True
-    subdirs: list[str] = field(default_factory=lambda: ["noarch", "linux-64"])
-    keywords: list[str] = field(default_factory=lambda: list(DEFAULT_KEYWORDS))
-    repodata_base_url: str = "https://conda.anaconda.org/conda-forge"
-
-
-@dataclass(frozen=True)
 class GitHubSearchConfig:
-    enabled: bool = False
+    enabled: bool = True
     keywords: list[str] = field(default_factory=lambda: list(DEFAULT_KEYWORDS))
     extra_qualifiers: list[str] = field(
         default_factory=lambda: ["archived:false", "fork:false", "stars:>=10"]
@@ -67,8 +47,6 @@ class GitHubSearchConfig:
 
 @dataclass(frozen=True)
 class SeedConfig:
-    pypi: PyPIConfig = field(default_factory=PyPIConfig)
-    conda_forge: CondaForgeConfig = field(default_factory=CondaForgeConfig)
     github_search: GitHubSearchConfig = field(default_factory=GitHubSearchConfig)
 
 
@@ -101,34 +79,10 @@ def load_seed_config(path: str | Path) -> SeedConfig:
     with config_path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}
 
-    pypi_raw = raw.get("pypi") or {}
-    conda_raw = raw.get("conda_forge") or {}
     github_search_raw = raw.get("github_search") or {}
 
-    pypi = PyPIConfig(
-        enabled=_as_bool(pypi_raw.get("enabled"), True),
-        keywords=_as_list(pypi_raw.get("keywords"), DEFAULT_KEYWORDS),
-        packages=_as_list(pypi_raw.get("packages"), []),
-        bigquery_project=pypi_raw.get("bigquery_project"),
-        bigquery_dataset=str(
-            pypi_raw.get("bigquery_dataset", PyPIConfig.bigquery_dataset)
-        ),
-        bigquery_downloads_table=str(
-            pypi_raw.get("bigquery_downloads_table", PyPIConfig.bigquery_downloads_table)
-        ),
-        bigquery_limit=_as_int_or_none(pypi_raw.get("bigquery_limit")),
-        http_limit=_as_int_or_none(pypi_raw.get("http_limit")),
-    )
-    conda_forge = CondaForgeConfig(
-        enabled=_as_bool(conda_raw.get("enabled"), True),
-        subdirs=_as_list(conda_raw.get("subdirs"), ["noarch", "linux-64"]),
-        keywords=_as_list(conda_raw.get("keywords"), DEFAULT_KEYWORDS),
-        repodata_base_url=str(
-            conda_raw.get("repodata_base_url", CondaForgeConfig.repodata_base_url)
-        ).rstrip("/"),
-    )
     github_search = GitHubSearchConfig(
-        enabled=_as_bool(github_search_raw.get("enabled"), False),
+        enabled=_as_bool(github_search_raw.get("enabled"), True),
         keywords=_as_list(github_search_raw.get("keywords"), DEFAULT_KEYWORDS),
         extra_qualifiers=_as_list(
             github_search_raw.get("extra_qualifiers"),
@@ -139,4 +93,4 @@ def load_seed_config(path: str | Path) -> SeedConfig:
         sort=str(github_search_raw.get("sort", "stars")),
         order=str(github_search_raw.get("order", "desc")),
     )
-    return SeedConfig(pypi=pypi, conda_forge=conda_forge, github_search=github_search)
+    return SeedConfig(github_search=github_search)

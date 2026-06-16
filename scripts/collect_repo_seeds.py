@@ -49,15 +49,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="YYYYMMDD date stamp for raw and interim artifacts.",
     )
-    parser.add_argument(
-        "--pypi-backend",
-        choices=["auto", "bigquery", "http-curated"],
-        default="auto",
-        help=(
-            "PyPI collection backend. auto tries BigQuery then falls back to "
-            "http-curated, which is only a package-list smoke/sample backend."
-        ),
-    )
     return parser.parse_args()
 
 
@@ -85,7 +76,6 @@ def main() -> int:
             config,
             output_root=output_root,
             run_date=args.date,
-            pypi_backend=args.pypi_backend,
         )
     except Exception as exc:
         print(f"seed collector failed: {exc}", file=sys.stderr)
@@ -94,8 +84,6 @@ def main() -> int:
     print(f"raw candidates: {outputs.raw_candidate_count}")
     print(f"normalized repos: {outputs.normalized_count}")
     print(f"processed repos: {outputs.processed_count}")
-    if outputs.pypi_backend_used:
-        print(f"pypi backend: {outputs.pypi_backend_used}")
     print(f"output root: {output_root}")
     print(f"processed csv: {outputs.processed_csv}")
     return 0

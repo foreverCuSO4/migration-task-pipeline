@@ -1,54 +1,7 @@
-# Example seed-source configuration.
-#
-# The first collector should start with package ecosystems rather than open-ended
-# GitHub search.
-
-pypi:
-  enabled: true
-  # auto backend tries BigQuery first and then falls back to these HTTP packages
-  # when BigQuery credentials are unavailable.
-  packages:
-    - torch
-    - pytorch-lightning
-    - tensorflow
-    - jax
-    - triton
-    - transformers
-    - accelerate
-    - torchvision
-    - torch-geometric
-    - mace-torch
-  keywords:
-    - torch
-    - pytorch
-    - cuda
-    - triton
-    - machine learning
-    - deep learning
-    - vision
-    - graph
-    - molecular
-    - simulation
-    - distributed
-    - transformer
-
-conda_forge:
-  enabled: true
-  subdirs:
-    - noarch
-    - linux-64
-  keywords:
-    - torch
-    - cuda
-    - triton
-    - simulation
-    - graph
-    - molecular
-    - distributed
+# Example GitHub repository search seed-source configuration.
 
 github_search:
-  enabled: false
-  # GitHub search is a repo discovery source, not a package-ecosystem source.
+  enabled: true
   # Keep this conservative because GitHub Search API has low per-minute limits.
   per_page: 50
   max_pages_per_query: 1

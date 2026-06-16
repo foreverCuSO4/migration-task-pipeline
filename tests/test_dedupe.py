@@ -4,26 +4,26 @@ from migration_task_pipeline.dedupe import dedupe_seed_records
 def test_dedupe_merges_sources_and_prefers_stronger_provenance():
     records = [
         {
-            "source": "pypi",
-            "package_name": "demo-pypi",
+            "source": "github-search",
+            "package_name": "",
             "repo_url": "https://github.com/Owner/Repo",
             "repo_key": "owner/repo",
-            "url_extract_field": "description",
+            "url_extract_field": "html_url",
             "matched_keywords": ["cuda"],
             "license": "MIT",
-            "homepage": "https://pypi.example",
-            "downloads_30d": 2000,
+            "homepage": "https://github.com/Owner/Repo",
+            "downloads_30d": "",
             "collected_at": "2026-06-16T00:00:00+00:00",
         },
         {
-            "source": "conda-forge",
-            "package_name": "demo-conda",
+            "source": "github-search",
+            "package_name": "",
             "repo_url": "https://github.com/Owner/Repo",
             "repo_key": "owner/repo",
-            "url_extract_field": "dev_url",
+            "url_extract_field": "html_url",
             "matched_keywords": ["torch", "cuda"],
             "license": "Apache-2.0",
-            "homepage": "https://conda.example",
+            "homepage": "https://repo.example",
             "downloads_30d": "",
             "collected_at": "2026-06-16T00:00:01+00:00",
         },
@@ -33,24 +33,24 @@ def test_dedupe_merges_sources_and_prefers_stronger_provenance():
 
     assert len(rows) == 1
     row = rows[0]
-    assert row["package_name"] == "demo-conda"
-    assert row["sources"] == ["conda-forge", "pypi"]
-    assert row["package_names"] == ["demo-conda", "demo-pypi"]
+    assert row["source"] == "github-search"
+    assert row["sources"] == ["github-search"]
+    assert row["package_names"] == []
     assert row["matched_keywords"] == ["cuda", "torch"]
-    assert row["downloads_30d"] == 2000
-    assert row["source_count"] == 2
+    assert row["downloads_30d"] == ""
+    assert row["source_count"] == 1
 
 
 def test_dedupe_preserves_existing_github_metadata_from_any_source():
     records = [
         {
-            "source": "pypi",
-            "package_name": "demo",
+            "source": "github-search",
+            "package_name": "",
             "repo_url": "https://github.com/Owner/Repo",
             "repo_key": "owner/repo",
-            "url_extract_field": "project_urls.Source",
+            "url_extract_field": "html_url",
             "matched_keywords": ["cuda"],
-            "downloads_30d": 1200,
+            "downloads_30d": "",
             "collected_at": "2026-06-16T00:00:00+00:00",
         },
         {
@@ -73,6 +73,6 @@ def test_dedupe_preserves_existing_github_metadata_from_any_source():
     rows = dedupe_seed_records(records)
 
     assert len(rows) == 1
-    assert rows[0]["package_name"] == "demo"
+    assert rows[0]["source"] == "github-search"
     assert rows[0]["github_stars"] == 25
     assert rows[0]["github_license"] == "MIT"

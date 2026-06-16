@@ -1,72 +1,8 @@
-from migration_task_pipeline.collectors.conda_forge import rows_to_seed_records as conda_rows
 from migration_task_pipeline.collectors.github_search import (
     collect_github_search_records,
     rows_to_seed_records as github_search_rows,
 )
-from migration_task_pipeline.collectors.pypi import collect_pypi_records, rows_to_seed_records as pypi_rows
-from migration_task_pipeline.config import GitHubSearchConfig, PyPIConfig
-
-
-def test_pypi_project_source_url_wins_over_homepage():
-    rows = [
-        {
-            "name": "demo",
-            "version": "1.0",
-            "summary": "CUDA toolkit",
-            "description": "docs at https://github.com/docs/site",
-            "keywords": "cuda",
-            "home_page": "https://github.com/home/page",
-            "project_urls": {
-                "Documentation": "https://github.com/docs/site",
-                "Source": "https://github.com/source/repo",
-            },
-            "license": "MIT",
-            "downloads_30d": 42,
-        }
-    ]
-
-    records = pypi_rows(rows, ["cuda"], "2026-06-16T00:00:00+00:00")
-
-    assert len(records) == 1
-    assert records[0]["repo_url"] == "https://github.com/source/repo"
-    assert records[0]["url_extract_field"] == "project_urls.Source"
-
-
-def test_conda_rows_match_keywords_and_extract_dev_url():
-    rows = [
-        {
-            "name": "demo",
-            "version": "2.0",
-            "summary": "Machine learning package",
-            "home": "https://example.com/demo",
-            "dev_url": "https://github.com/example/demo.git",
-            "license": "Apache-2.0",
-            "source_record_id": "conda-forge:noarch:demo",
-        }
-    ]
-
-    records = conda_rows(rows, ["machine learning"], "2026-06-16T00:00:00+00:00")
-
-    assert len(records) == 1
-    assert records[0]["repo_key"] == "example/demo"
-    assert records[0]["url_extract_field"] == "dev_url"
-
-
-def test_pypi_http_alias_reports_http_curated(monkeypatch):
-    def fake_fetch(config, session=None):
-        return []
-
-    monkeypatch.setattr("migration_task_pipeline.collectors.pypi.fetch_pypi_http", fake_fetch)
-
-    raw, records, backend = collect_pypi_records(
-        PyPIConfig(enabled=True),
-        backend="http",
-        collected_at="2026-06-16T00:00:00+00:00",
-    )
-
-    assert raw == []
-    assert records == []
-    assert backend == "http-curated"
+from migration_task_pipeline.config import GitHubSearchConfig, load_seed_config
 
 
 def test_github_search_rows_use_repo_fields_without_package_metadata():
@@ -142,3 +78,11 @@ def test_github_search_collector_builds_queries():
         ("cuda archived:false fork:false", 10, 1, "stars", "desc"),
         ("cuda archived:false fork:false", 10, 2, "stars", "desc"),
     ]
+
+
+def test_example_config_loads_github_search_source():
+    config = load_seed_config("configs/seed-sources.example.yaml")
+
+    assert config.github_search.enabled
+    assert len(config.github_search.keywords) == 12
+

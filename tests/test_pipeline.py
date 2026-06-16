@@ -1,4 +1,4 @@
-from migration_task_pipeline.config import CondaForgeConfig, GitHubSearchConfig, PyPIConfig, SeedConfig
+from migration_task_pipeline.config import GitHubSearchConfig, SeedConfig
 from migration_task_pipeline.pipeline import run_seed_collector_v0
 
 
@@ -27,19 +27,6 @@ class FakeGitHubClient:
 
 
 def test_pipeline_writes_expected_artifacts(tmp_path, monkeypatch):
-    def fake_pypi_raw_rows(config, backend, backend_state):
-        backend_state["value"] = "http-curated"
-        yield {
-            "name": "demo",
-            "version": "1.0",
-            "summary": "CUDA package",
-            "keywords": "cuda",
-            "home_page": "https://github.com/Owner/Repo",
-        }
-
-    def fake_conda_raw_rows(config):
-        return iter(())
-
     def fake_github_search_raw_rows(config, client):
         yield {
             "name": "Repo",
@@ -55,31 +42,21 @@ def test_pipeline_writes_expected_artifacts(tmp_path, monkeypatch):
             "size": 100,
         }
 
-    monkeypatch.setattr("migration_task_pipeline.pipeline._iter_pypi_raw_rows", fake_pypi_raw_rows)
-    monkeypatch.setattr("migration_task_pipeline.pipeline.fetch_conda_repodata", fake_conda_raw_rows)
     monkeypatch.setattr("migration_task_pipeline.pipeline.search_github_repositories", fake_github_search_raw_rows)
 
     outputs = run_seed_collector_v0(
-        SeedConfig(
-            pypi=PyPIConfig(enabled=True),
-            conda_forge=CondaForgeConfig(enabled=True),
-            github_search=GitHubSearchConfig(enabled=True),
-        ),
+        SeedConfig(github_search=GitHubSearchConfig(enabled=True)),
         output_root=tmp_path,
         run_date="20260616",
-        pypi_backend="http-curated",
         github_client=FakeGitHubClient(),
     )
 
-    assert outputs.raw_candidate_count == 2
-    assert outputs.normalized_count == 2
-    assert outputs.processed_count == 2
-    assert outputs.pypi_backend_used == "http-curated"
+    assert outputs.raw_candidate_count == 1
+    assert outputs.normalized_count == 1
+    assert outputs.processed_count == 1
     assert outputs.processed_csv.read_text(encoding="utf-8").splitlines()[0].startswith(
         "source,package_name,package_version,repo_url"
     )
-    assert (tmp_path / "raw" / "pypi-packages-20260616.jsonl").exists()
-    assert (tmp_path / "raw" / "conda-forge-repodata-20260616.jsonl").exists()
     assert (tmp_path / "raw" / "github-search-repositories-20260616.jsonl").exists()
     assert (tmp_path / "interim" / "repo-urls-normalized-20260616.csv").exists()
     assert (tmp_path / "interim" / "github-metadata-20260616.jsonl").exists()
@@ -89,36 +66,30 @@ def test_pipeline_writes_expected_artifacts(tmp_path, monkeypatch):
 def test_pipeline_enriches_each_candidate_before_collecting_next_raw_row(tmp_path, monkeypatch):
     events = []
 
-    def fake_pypi_raw_rows(config, backend, backend_state):
-        backend_state["value"] = "http-curated"
+    def fake_github_search_raw_rows(config, client):
         events.append("raw:first")
         yield {
-            "name": "first",
-            "version": "1.0",
-            "summary": "CUDA package",
-            "keywords": "cuda",
-            "home_page": "https://github.com/Owner/First",
+            "name": "First",
+            "full_name": "Owner/First",
+            "html_url": "https://github.com/Owner/First",
+            "description": "CUDA package",
+            "topics": ["cuda"],
         }
         events.append("raw:second")
         yield {
-            "name": "second",
-            "version": "1.0",
-            "summary": "CUDA package",
-            "keywords": "cuda",
-            "home_page": "https://github.com/Owner/Second",
+            "name": "Second",
+            "full_name": "Owner/Second",
+            "html_url": "https://github.com/Owner/Second",
+            "description": "CUDA package",
+            "topics": ["cuda"],
         }
 
-    monkeypatch.setattr("migration_task_pipeline.pipeline._iter_pypi_raw_rows", fake_pypi_raw_rows)
+    monkeypatch.setattr("migration_task_pipeline.pipeline.search_github_repositories", fake_github_search_raw_rows)
 
     run_seed_collector_v0(
-        SeedConfig(
-            pypi=PyPIConfig(enabled=True),
-            conda_forge=CondaForgeConfig(enabled=False),
-            github_search=GitHubSearchConfig(enabled=False),
-        ),
+        SeedConfig(github_search=GitHubSearchConfig(enabled=True)),
         output_root=tmp_path,
         run_date="20260616",
-        pypi_backend="http-curated",
         github_client=FakeGitHubClient(events),
     )
 

@@ -8,12 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Iterable
 
-from .collectors.conda_forge import fetch_conda_repodata
-from .collectors.conda_forge import raw_row_to_seed_record as conda_raw_to_seed
 from .collectors.github_search import raw_row_to_seed_record as github_search_raw_to_seed
 from .collectors.github_search import search_github_repositories
-from .collectors.pypi import fetch_pypi_http, query_pypi_bigquery
-from .collectors.pypi import raw_row_to_seed_record as pypi_raw_to_seed
 from .config import SeedConfig
 from .dedupe import dedupe_seed_records, normalized_repo_rows
 from .github_metadata import GitHubClient, enrich_repositories
@@ -23,8 +19,6 @@ from .schema import NORMALIZED_REPO_COLUMNS, REPO_SEEDS_V0_COLUMNS, normalize_ro
 
 @dataclass(frozen=True)
 class PipelineOutputs:
-    pypi_raw: Path | None
-    conda_raw: Path | None
     github_search_raw: Path | None
     normalized_csv: Path
     github_metadata_jsonl: Path
@@ -32,7 +26,6 @@ class PipelineOutputs:
     raw_candidate_count: int
     normalized_count: int
     processed_count: int
-    pypi_backend_used: str | None
 
 
 class StreamingSeedCollector:
@@ -111,7 +104,6 @@ def run_seed_collector_v0(
     *,
     output_root: str | Path = "data",
     run_date: str | None = None,
-    pypi_backend: str = "auto",
     github_client: GitHubClient | None = None,
 ) -> PipelineOutputs:
     run_date = run_date or datetime.now(UTC).strftime("%Y%m%d")
@@ -120,32 +112,11 @@ def run_seed_collector_v0(
     client = github_client or GitHubClient.from_env()
     collector = StreamingSeedCollector(client)
 
-    pypi_raw_path = None
-    conda_raw_path = None
     github_search_raw_path = None
-    pypi_backend_state: dict[str, str | None] = {"value": None}
     github_metadata_path = data_root / "interim" / f"github-metadata-{run_date}.jsonl"
     ensure_parent(github_metadata_path)
 
     with github_metadata_path.open("w", encoding="utf-8") as metadata_handle:
-        if config.pypi.enabled:
-            pypi_raw_path = data_root / "raw" / f"pypi-packages-{run_date}.jsonl"
-            collector.process_raw_rows(
-                _iter_pypi_raw_rows(config, pypi_backend, pypi_backend_state),
-                raw_path=pypi_raw_path,
-                transform=lambda row: pypi_raw_to_seed(row, config.pypi.keywords, collected_at),
-                metadata_handle=metadata_handle,
-            )
-
-        if config.conda_forge.enabled:
-            conda_raw_path = data_root / "raw" / f"conda-forge-repodata-{run_date}.jsonl"
-            collector.process_raw_rows(
-                fetch_conda_repodata(config.conda_forge),
-                raw_path=conda_raw_path,
-                transform=lambda row: conda_raw_to_seed(row, config.conda_forge.keywords, collected_at),
-                metadata_handle=metadata_handle,
-            )
-
         if config.github_search.enabled:
             github_search_raw_path = data_root / "raw" / f"github-search-repositories-{run_date}.jsonl"
             collector.process_raw_rows(
@@ -163,8 +134,6 @@ def run_seed_collector_v0(
     write_csv(processed_path, processed_rows, REPO_SEEDS_V0_COLUMNS)
 
     return PipelineOutputs(
-        pypi_raw=pypi_raw_path,
-        conda_raw=conda_raw_path,
         github_search_raw=github_search_raw_path,
         normalized_csv=normalized_path,
         github_metadata_jsonl=github_metadata_path,
@@ -172,36 +141,7 @@ def run_seed_collector_v0(
         raw_candidate_count=collector.raw_candidate_count,
         normalized_count=len(collector.repo_rows),
         processed_count=len(processed_rows),
-        pypi_backend_used=pypi_backend_state["value"],
     )
-
-
-def _iter_pypi_raw_rows(
-    config: SeedConfig,
-    backend: str,
-    backend_state: dict[str, str | None],
-) -> Iterable[dict[str, object]]:
-    if backend == "http":
-        backend = "http-curated"
-    if backend not in {"auto", "bigquery", "http-curated"}:
-        raise ValueError(f"Unsupported PyPI backend: {backend}")
-
-    if backend in {"auto", "bigquery"}:
-        try:
-            backend_state["value"] = "bigquery"
-            yield from query_pypi_bigquery(config.pypi)
-            return
-        except Exception as exc:
-            if backend == "bigquery":
-                raise
-            print(
-                "PyPI BigQuery backend unavailable; falling back to HTTP curated package list. "
-                "This backend is for smoke/sample runs and does not provide broad PyPI discovery. "
-                f"Reason: {exc}"
-            )
-
-    backend_state["value"] = "http-curated"
-    yield from fetch_pypi_http(config.pypi)
 
 
 def _write_jsonl_row(handle, row: dict[str, object]) -> None:
