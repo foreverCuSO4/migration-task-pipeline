@@ -1,4 +1,4 @@
-from migration_task_pipeline.config import GitHubSearchConfig, SeedConfig
+from migration_task_pipeline.config import GitHubSearchConfig, GoalConfig, SeedConfig
 from migration_task_pipeline.pipeline import run_seed_collector_v0
 
 
@@ -27,7 +27,7 @@ class FakeGitHubClient:
 
 
 def test_pipeline_writes_expected_artifacts(tmp_path, monkeypatch):
-    def fake_github_search_raw_rows(config, client):
+    def fake_github_search_raw_rows(config, client, max_requests=None):
         yield {
             "name": "Repo",
             "full_name": "Search/Repo",
@@ -66,7 +66,7 @@ def test_pipeline_writes_expected_artifacts(tmp_path, monkeypatch):
 def test_pipeline_enriches_each_candidate_before_collecting_next_raw_row(tmp_path, monkeypatch):
     events = []
 
-    def fake_github_search_raw_rows(config, client):
+    def fake_github_search_raw_rows(config, client, max_requests=None):
         events.append("raw:first")
         yield {
             "name": "First",
@@ -100,3 +100,32 @@ def test_pipeline_enriches_each_candidate_before_collecting_next_raw_row(tmp_pat
         "enrich:owner/second",
     ]
 
+
+def test_pipeline_stops_when_goal_processed_count_is_reached(tmp_path, monkeypatch):
+    events = []
+
+    def fake_github_search_raw_rows(config, client, max_requests=None):
+        for name in ["First", "Second", "Third"]:
+            events.append(f"raw:{name.lower()}")
+            yield {
+                "name": name,
+                "full_name": f"Owner/{name}",
+                "html_url": f"https://github.com/Owner/{name}",
+                "description": "CUDA package",
+                "topics": ["cuda"],
+            }
+
+    monkeypatch.setattr("migration_task_pipeline.pipeline.search_github_repositories", fake_github_search_raw_rows)
+
+    outputs = run_seed_collector_v0(
+        SeedConfig(
+            github_search=GitHubSearchConfig(enabled=True),
+            goal=GoalConfig(enabled=True, target_processed_repos=1, max_search_requests=10),
+        ),
+        output_root=tmp_path,
+        run_date="20260616",
+        github_client=FakeGitHubClient(events),
+    )
+
+    assert outputs.processed_count == 1
+    assert events == ["raw:first", "enrich:owner/first"]

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 import requests
@@ -40,10 +42,10 @@ class GitHubClient:
     api_base_url: str = "https://api.github.com"
 
     @classmethod
-    def from_env(cls) -> "GitHubClient":
-        token = os.getenv("GITHUB_TOKEN")
+    def from_env(cls, *, auth_path: str | Path = "auth.json") -> "GitHubClient":
+        token = os.getenv("GITHUB_TOKEN") or _load_github_api_key(auth_path)
         if not token:
-            raise RuntimeError("GITHUB_TOKEN is required for GitHub metadata enrichment")
+            raise RuntimeError("GITHUB_TOKEN or auth.json github_api_key is required for GitHub API access")
         return cls(token=token)
 
     def get_repo_metadata(self, repo_key: str) -> dict[str, object]:
@@ -184,3 +186,28 @@ def _as_int(value: object) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _load_github_api_key(auth_path: str | Path) -> str:
+    path = Path(auth_path)
+    if not path.exists():
+        return ""
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+
+    candidate_keys = ("github_api_key", "github_token", "github_key")
+    if isinstance(payload, dict):
+        for key in candidate_keys:
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        for value in payload.values():
+            if isinstance(value, dict):
+                for key in candidate_keys:
+                    nested = value.get(key)
+                    if isinstance(nested, str) and nested.strip():
+                        return nested.strip()
+    return ""

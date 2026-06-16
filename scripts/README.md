@@ -13,6 +13,12 @@ GITHUB_TOKEN=... python scripts/collect_repo_seeds.py \
   --config configs/seed-sources.example.yaml
 ```
 
+Alternatively, put the token in ignored `auth.json`:
+
+```json
+{"github_api_key": "..."}
+```
+
 When `--output-root` is omitted, each run writes under a timestamped directory:
 
 ```text
@@ -28,6 +34,10 @@ fields such as package version or package download counts.
 The search results already include common GitHub metadata, so the enrichment
 step reuses complete `github_*` fields and skips an extra `/repos/<owner>/<repo>`
 request for those rows.
+
+Goal mode is enabled in the default config. The search frontier keeps issuing
+repository-search queries until `goal.target_processed_repos` final rows pass
+filtering or `goal.max_search_requests` is exhausted.
 
 The collector runs as a serial streaming pipeline: each raw source record is
 written, converted to a seed candidate, deduplicated, enriched, and filtered

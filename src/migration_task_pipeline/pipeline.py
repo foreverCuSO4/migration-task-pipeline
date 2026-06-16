@@ -46,16 +46,21 @@ class StreamingSeedCollector:
         raw_path: Path,
         transform: Callable[[dict[str, object]], dict[str, object] | None],
         metadata_handle,
+        target_processed_repos: int | None = None,
     ) -> None:
         ensure_parent(raw_path)
         with raw_path.open("w", encoding="utf-8") as raw_handle:
             for raw_row in raw_rows:
+                if self.goal_reached(target_processed_repos):
+                    break
                 _write_jsonl_row(raw_handle, raw_row)
                 seed_record = transform(raw_row)
                 if seed_record is None:
                     continue
                 self.raw_candidate_count += 1
                 self.process_seed_record(seed_record, metadata_handle)
+                if self.goal_reached(target_processed_repos):
+                    break
 
     def process_seed_record(self, seed_record: dict[str, object], metadata_handle) -> None:
         repo_key = str(seed_record.get("repo_key") or "").lower()
@@ -98,18 +103,22 @@ class StreamingSeedCollector:
     def processed_rows(self) -> list[dict[str, object]]:
         return [self.retained_by_repo[key] for key in sorted(self.retained_by_repo)]
 
+    def goal_reached(self, target_processed_repos: int | None) -> bool:
+        return target_processed_repos is not None and len(self.retained_by_repo) >= target_processed_repos
+
 
 def run_seed_collector_v0(
     config: SeedConfig,
     *,
     output_root: str | Path = "data",
     run_date: str | None = None,
+    auth_path: str | Path = "auth.json",
     github_client: GitHubClient | None = None,
 ) -> PipelineOutputs:
     run_date = run_date or datetime.now(UTC).strftime("%Y%m%d")
     collected_at = datetime.now(UTC).isoformat()
     data_root = Path(output_root)
-    client = github_client or GitHubClient.from_env()
+    client = github_client or GitHubClient.from_env(auth_path=auth_path)
     collector = StreamingSeedCollector(client)
 
     github_search_raw_path = None
@@ -120,10 +129,15 @@ def run_seed_collector_v0(
         if config.github_search.enabled:
             github_search_raw_path = data_root / "raw" / f"github-search-repositories-{run_date}.jsonl"
             collector.process_raw_rows(
-                search_github_repositories(config.github_search, client),
+                search_github_repositories(
+                    config.github_search,
+                    client,
+                    max_requests=config.goal.max_search_requests if config.goal.enabled else None,
+                ),
                 raw_path=github_search_raw_path,
                 transform=lambda row: github_search_raw_to_seed(row, config.github_search.keywords, collected_at),
                 metadata_handle=metadata_handle,
+                target_processed_repos=config.goal.target_processed_repos if config.goal.enabled else None,
             )
 
     normalized_path = data_root / "interim" / f"repo-urls-normalized-{run_date}.csv"

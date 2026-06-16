@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Iterable
 
@@ -9,6 +10,29 @@ from ..config import GitHubSearchConfig
 from ..github_metadata import GitHubClient, github_api_payload_to_metadata
 from ..github_urls import normalize_github_url
 from ..keywords import match_keywords
+
+STAR_BUCKETS = [
+    "stars:>=1000",
+    "stars:100..999",
+    "stars:50..99",
+    "stars:10..49",
+]
+
+LANGUAGE_QUALIFIERS = [
+    "language:Python",
+    "language:C++",
+    "language:C",
+    "language:Cuda",
+]
+
+
+@dataclass(frozen=True)
+class QuerySpec:
+    query: str
+    keyword: str
+    page: int
+    sort: str
+    order: str
 
 
 def collect_github_search_records(
@@ -26,23 +50,45 @@ def collect_github_search_records(
 def search_github_repositories(
     config: GitHubSearchConfig,
     client: GitHubClient,
+    *,
+    max_requests: int | None = None,
 ) -> Iterable[dict[str, object]]:
-    for keyword in config.keywords:
-        query = _build_query(keyword, config.extra_qualifiers)
+    request_count = 0
+    for query_spec in iter_query_frontier(config):
+        if max_requests is not None and request_count >= max_requests:
+            break
+        request_count += 1
+        payload = client.search_repositories(
+            query_spec.query,
+            per_page=config.per_page,
+            page=query_spec.page,
+            sort=query_spec.sort,
+            order=query_spec.order,
+        )
+        for item in payload.get("items") or []:
+            row = dict(item)
+            row["search_keyword"] = query_spec.keyword
+            row["search_query"] = query_spec.query
+            row["search_page"] = query_spec.page
+            row["source_record_id"] = f"github-search:{item.get('full_name', '')}"
+            yield row
+
+
+def iter_query_frontier(config: GitHubSearchConfig) -> Iterable[QuerySpec]:
+    seen: set[tuple[str, int, str, str]] = set()
+    for query in _query_families(config):
         for page in range(1, config.max_pages_per_query + 1):
-            payload = client.search_repositories(
-                query,
-                per_page=config.per_page,
+            key = (query, page, config.sort, config.order)
+            if key in seen:
+                continue
+            seen.add(key)
+            yield QuerySpec(
+                query=query,
+                keyword=_query_keyword(query),
                 page=page,
                 sort=config.sort,
                 order=config.order,
             )
-            for item in payload.get("items") or []:
-                row = dict(item)
-                row["search_keyword"] = keyword
-                row["search_query"] = query
-                row["source_record_id"] = f"github-search:{item.get('full_name', '')}"
-                yield row
 
 
 def rows_to_seed_records(
@@ -113,3 +159,26 @@ def _build_query(keyword: str, extra_qualifiers: list[str]) -> str:
     parts = [keyword.strip()]
     parts.extend(qualifier.strip() for qualifier in extra_qualifiers if qualifier.strip())
     return " ".join(part for part in parts if part)
+
+
+def _query_families(config: GitHubSearchConfig) -> Iterable[str]:
+    cleaned_qualifiers = [
+        qualifier.strip()
+        for qualifier in config.extra_qualifiers
+        if qualifier.strip() and not qualifier.strip().startswith("stars:")
+    ]
+
+    for keyword in config.keywords:
+        yield _build_query(keyword, config.extra_qualifiers)
+
+    for keyword in config.keywords:
+        for star_bucket in STAR_BUCKETS:
+            yield _build_query(keyword, [*cleaned_qualifiers, star_bucket])
+
+    for keyword in config.keywords:
+        for language in LANGUAGE_QUALIFIERS:
+            yield _build_query(keyword, [*config.extra_qualifiers, language])
+
+
+def _query_keyword(query: str) -> str:
+    return query.split(" ", 1)[0]

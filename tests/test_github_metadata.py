@@ -143,7 +143,17 @@ def test_github_client_requires_token(monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
     with pytest.raises(RuntimeError, match="GITHUB_TOKEN"):
-        GitHubClient.from_env()
+        GitHubClient.from_env(auth_path="/tmp/does-not-exist-auth.json")
+
+
+def test_github_client_loads_token_from_auth_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    auth_file = tmp_path / "auth.json"
+    auth_file.write_text('{"github_api_key": "from-file"}', encoding="utf-8")
+
+    client = GitHubClient.from_env(auth_path=auth_file)
+
+    assert client.token == "from-file"
 
 
 def test_github_client_searches_repositories():

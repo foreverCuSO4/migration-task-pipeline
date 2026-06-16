@@ -3,8 +3,8 @@
 github_search:
   enabled: true
   # Keep this conservative because GitHub Search API has low per-minute limits.
-  per_page: 50
-  max_pages_per_query: 1
+  per_page: 100
+  max_pages_per_query: 10
   sort: stars
   order: desc
   extra_qualifiers:
@@ -25,6 +25,11 @@ github_search:
     - simulation
     - distributed
     - transformer
+
+goal:
+  enabled: true
+  target_processed_repos: 100
+  max_search_requests: 1000
 
 github_url_normalization:
   canonical_form: "https://github.com/<owner>/<repo>"

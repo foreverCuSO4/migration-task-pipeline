@@ -49,6 +49,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="YYYYMMDD date stamp for raw and interim artifacts.",
     )
+    parser.add_argument(
+        "--auth-file",
+        default="auth.json",
+        help="JSON file containing github_api_key; GITHUB_TOKEN still takes precedence.",
+    )
     return parser.parse_args()
 
 
@@ -76,6 +81,7 @@ def main() -> int:
             config,
             output_root=output_root,
             run_date=args.date,
+            auth_path=args.auth_file,
         )
     except Exception as exc:
         print(f"seed collector failed: {exc}", file=sys.stderr)

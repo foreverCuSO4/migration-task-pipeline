@@ -39,15 +39,23 @@ class GitHubSearchConfig:
     extra_qualifiers: list[str] = field(
         default_factory=lambda: ["archived:false", "fork:false", "stars:>=10"]
     )
-    per_page: int = 50
-    max_pages_per_query: int = 1
+    per_page: int = 100
+    max_pages_per_query: int = 10
     sort: str = "stars"
     order: str = "desc"
 
 
 @dataclass(frozen=True)
+class GoalConfig:
+    enabled: bool = True
+    target_processed_repos: int = 100
+    max_search_requests: int = 1000
+
+
+@dataclass(frozen=True)
 class SeedConfig:
     github_search: GitHubSearchConfig = field(default_factory=GitHubSearchConfig)
+    goal: GoalConfig = field(default_factory=GoalConfig)
 
 
 def _as_bool(value: Any, default: bool) -> bool:
@@ -80,6 +88,7 @@ def load_seed_config(path: str | Path) -> SeedConfig:
         raw = yaml.safe_load(handle) or {}
 
     github_search_raw = raw.get("github_search") or {}
+    goal_raw = raw.get("goal") or {}
 
     github_search = GitHubSearchConfig(
         enabled=_as_bool(github_search_raw.get("enabled"), True),
@@ -93,4 +102,9 @@ def load_seed_config(path: str | Path) -> SeedConfig:
         sort=str(github_search_raw.get("sort", "stars")),
         order=str(github_search_raw.get("order", "desc")),
     )
-    return SeedConfig(github_search=github_search)
+    goal = GoalConfig(
+        enabled=_as_bool(goal_raw.get("enabled"), True),
+        target_processed_repos=_as_int_or_none(goal_raw.get("target_processed_repos")) or 100,
+        max_search_requests=_as_int_or_none(goal_raw.get("max_search_requests")) or 1000,
+    )
+    return SeedConfig(github_search=github_search, goal=goal)
