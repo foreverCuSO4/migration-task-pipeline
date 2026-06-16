@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local environment
+.env
+.env.*
+
+# Pipeline artifacts
+runs/
+data/raw/
+data/interim/
+data/external/
+
+# Large local repository checkouts
+repos/
+downloads/
+archives/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS/editor
+.DS_Store
+*.swp
+*.swo
+

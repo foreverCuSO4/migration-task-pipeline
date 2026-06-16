@@ -1,0 +1,52 @@
+# Draft candidate-card schema for agent review.
+
+repo:
+  url: ""
+  owner: ""
+  name: ""
+
+summary:
+  what_project_does: ""
+  why_it_might_be_g4: ""
+
+migration_surface:
+  cuda_usage: []
+  device_dispatch_points: []
+  custom_ops: []
+  distributed_runtime: []
+  dtype_or_precision: []
+  serialization_or_checkpoint: []
+  training_loop: []
+  inference_interface: []
+
+verifier_feasibility:
+  public_interface: ""
+  small_inputs_possible: null
+  offline_reference_possible: null
+  npu_evidence_possible: null
+  expected_runtime_minutes: null
+  required_assets: []
+
+benchmark_value:
+  likely_difficulty: ""
+  hidden_case_diversity: ""
+  partial_credit_plan: ""
+  expected_score_spread: ""
+
+data_value:
+  likely_debug_depth: ""
+  reusable_migration_patterns: []
+  expected_failure_modes: []
+
+risks:
+  license_risk: ""
+  dependency_risk: ""
+  data_risk: ""
+  runtime_risk: ""
+  ambiguity_risk: ""
+
+recommendation:
+  status: ""  # A | B | C
+  reason: ""
+  first_manual_probe: ""
+

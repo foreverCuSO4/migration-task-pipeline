@@ -1,0 +1,45 @@
+# Example seed-source configuration.
+#
+# The first collector should start with package ecosystems rather than open-ended
+# GitHub search.
+
+pypi:
+  enabled: true
+  keywords:
+    - torch
+    - pytorch
+    - cuda
+    - triton
+    - machine learning
+    - deep learning
+    - vision
+    - graph
+    - molecular
+    - simulation
+    - distributed
+    - transformer
+
+conda_forge:
+  enabled: true
+  subdirs:
+    - noarch
+    - linux-64
+  keywords:
+    - torch
+    - cuda
+    - triton
+    - simulation
+    - graph
+    - molecular
+    - distributed
+
+github_url_normalization:
+  canonical_form: "https://github.com/<owner>/<repo>"
+  strip_suffixes:
+    - ".git"
+  strip_path_prefixes:
+    - issues
+    - pulls
+    - tree
+    - blob
+
