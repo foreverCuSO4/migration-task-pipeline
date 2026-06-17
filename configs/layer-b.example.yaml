@@ -1,0 +1,87 @@
+# Example configuration for Layer B remote GitHub code-search screening.
+
+remote_code_search:
+  # GitHub code-search results fetched for each query.
+  per_page: 5
+
+  # Limit per-repository code-search calls. Queries are evaluated in the order
+  # listed below.
+  max_code_queries_per_repo: 24
+
+  # Fetch the repository git tree through GitHub API before code search.
+  use_remote_tree: true
+
+  # B-layer decision thresholds.
+  promote_threshold: 0.65
+  maybe_threshold: 0.45
+
+  rate_limit:
+    # null means wait indefinitely until GitHub allows the request.
+    max_retries: null
+    retry_sleep_seconds: 60.0
+    max_sleep_seconds: 300.0
+
+  code_queries:
+    - group: cuda
+      term: torch.cuda
+    - group: cuda
+      term: .cuda(
+    - group: cuda
+      term: device="cuda"
+    - group: cuda
+      term: CUDAExtension
+    - group: cuda
+      term: triton.jit
+    - group: cuda
+      term: cupy
+    - group: cuda
+      term: numba.cuda
+    - group: cuda
+      term: nccl
+    - group: cuda
+      term: nvcc
+    - group: cuda
+      term: extension:cu
+      query: extension:cu
+    - group: cuda
+      term: extension:cuh
+      query: extension:cuh
+    - group: interface
+      term: console_scripts
+    - group: interface
+      term: argparse.ArgumentParser
+    - group: interface
+      term: click.command
+    - group: interface
+      term: typer.Typer
+    - group: interface
+      term: if __name__ == "__main__"
+    - group: reference
+      term: --device cpu
+    - group: reference
+      term: device == "cpu"
+    - group: reference
+      term: map_location="cpu"
+    - group: reference
+      term: reference
+    - group: reference
+      term: fixture
+    - group: risk
+      term: wandb
+    - group: risk
+      term: kaggle
+    - group: risk
+      term: gdown
+    - group: risk
+      term: s3://
+    - group: risk
+      term: flash-attn
+    - group: risk
+      term: deepspeed
+
+runtime:
+  # Resume from existing repo-candidates-b.csv by default.
+  resume: true
+
+  # auto: show only on interactive terminals; on/off force behavior.
+  dashboard: auto

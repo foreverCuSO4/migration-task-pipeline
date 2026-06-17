@@ -80,6 +80,21 @@ python scripts/screen_repo_candidates_b.py \
   --auth-file auth.json
 ```
 
+By default, Layer B reads `configs/layer-b.example.yaml`. Use `--config` to
+point at a different YAML file:
+
+```bash
+python scripts/screen_repo_candidates_b.py \
+  --config configs/layer-b.example.yaml \
+  --seed-csv runs/<run>/data/processed/repo-seeds-v0.csv \
+  --auth-file auth.json
+```
+
+CLI flags such as `--per-page`, `--max-code-queries-per-repo`,
+`--rate-limit-max-retries`, `--rate-limit-retry-sleep`, `--rate-limit-max-sleep`,
+`--tree`, `--no-tree`, `--resume`, and `--no-resume` override values from the
+config file.
+
 For a smoke test, limit the number of rows:
 
 ```bash
