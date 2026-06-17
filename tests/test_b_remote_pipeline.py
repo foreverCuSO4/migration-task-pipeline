@@ -4,6 +4,7 @@ import json
 from migration_task_pipeline.layers.b_remote_code_search.config import RemoteCodeSearchConfig
 from migration_task_pipeline.layers.b_remote_code_search.github_client import GitHubAccessError, GitHubRateLimitError
 from migration_task_pipeline.layers.b_remote_code_search.pipeline import RemoteScanIncomplete, run_remote_code_screening
+from migration_task_pipeline.layers.b_remote_code_search.schema import B_CANDIDATE_COLUMNS
 
 
 class FakeGitHubRemoteClient:
@@ -58,6 +59,20 @@ class AccessDeniedClient(FakeGitHubRemoteClient):
         raise GitHubAccessError("GitHub API access error: HTTP 403")
 
 
+class RecordingGitHubRemoteClient(FakeGitHubRemoteClient):
+    def __init__(self):
+        self.tree_repos = []
+        self.search_queries = []
+
+    def get_tree(self, repo_key, ref):
+        self.tree_repos.append(repo_key)
+        return super().get_tree(repo_key, ref)
+
+    def search_code(self, query, *, per_page=5, page=1):
+        self.search_queries.append(query)
+        return super().search_code(query, per_page=per_page, page=page)
+
+
 def test_remote_code_screening_writes_outputs(tmp_path):
     seed_csv = tmp_path / "repo-seeds-v0.csv"
     with seed_csv.open("w", encoding="utf-8", newline="") as handle:
@@ -106,6 +121,33 @@ def test_remote_code_screening_writes_outputs(tmp_path):
     assert evidence["code_hits"]
     log_text = outputs.log_file.read_text(encoding="utf-8")
     assert '"event": "repo_done"' in log_text
+
+
+def test_remote_code_screening_resumes_from_existing_candidate_csv_by_default(tmp_path):
+    seed_csv = write_seed_csv_for_repos(tmp_path, ["owner/repo", "other/repo"])
+    candidates_path = tmp_path / "processed" / "repo-candidates-b.csv"
+    candidates_path.parent.mkdir(parents=True)
+    with candidates_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=B_CANDIDATE_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerow({"repo_key": "owner/repo", "repo_url": "https://github.com/owner/repo", "b_decision": "promote"})
+    client = RecordingGitHubRemoteClient()
+
+    outputs = run_remote_code_screening(
+        seed_csv,
+        output_root=tmp_path,
+        run_date="20260617",
+        github_client=client,
+        config=RemoteCodeSearchConfig(per_page=2, max_code_queries_per_repo=1),
+    )
+
+    rows = list(csv.DictReader(candidates_path.open(encoding="utf-8", newline="")))
+    assert outputs.resumed_count == 1
+    assert outputs.scanned_count == 2
+    assert [row["repo_key"] for row in rows] == ["owner/repo", "other/repo"]
+    assert client.tree_repos == ["other/repo"]
+    assert all("repo:owner/repo" not in query for query in client.search_queries)
+    assert '"event": "repo_skipped_resume"' in outputs.log_file.read_text(encoding="utf-8")
 
 
 def test_remote_code_screening_emits_progress_events(tmp_path):
@@ -204,6 +246,10 @@ def test_remote_code_screening_does_not_write_reject_on_access_error(tmp_path):
 
 
 def write_seed_csv(tmp_path):
+    return write_seed_csv_for_repos(tmp_path, ["owner/repo"])
+
+
+def write_seed_csv_for_repos(tmp_path, repo_keys):
     seed_csv = tmp_path / "repo-seeds-v0.csv"
     with seed_csv.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
@@ -219,15 +265,17 @@ def write_seed_csv(tmp_path):
             ],
         )
         writer.writeheader()
-        writer.writerow(
-            {
-                "repo_key": "owner/repo",
-                "repo_url": "https://github.com/owner/repo",
-                "repo_owner": "owner",
-                "repo_name": "repo",
-                "github_size_kb": str(50 * 1024),
-                "github_archived": "false",
-                "github_default_branch": "main",
-            }
-        )
+        for repo_key in repo_keys:
+            owner, repo_name = repo_key.split("/", 1)
+            writer.writerow(
+                {
+                    "repo_key": repo_key,
+                    "repo_url": f"https://github.com/{repo_key}",
+                    "repo_owner": owner,
+                    "repo_name": repo_name,
+                    "github_size_kb": str(50 * 1024),
+                    "github_archived": "false",
+                    "github_default_branch": "main",
+                }
+            )
     return seed_csv

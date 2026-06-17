@@ -26,3 +26,25 @@ def test_dashboard_lines_show_core_progress_fields():
     assert "promote 2" in text
     assert "#26 owner/repo" in text
     assert "code search: torch.cuda (4 hits)" in text
+
+
+def test_dashboard_rate_excludes_resumed_repos():
+    lines = dashboard_lines(
+        {
+            "event": "repo_done",
+            "total_count": 100,
+            "scanned_count": 25,
+            "resumed_count": 20,
+            "promoted_count": 2,
+            "maybe_count": 3,
+            "rejected_count": 20,
+            "current_index": 26,
+            "current_repo_key": "owner/repo",
+            "elapsed_sec": 300,
+        },
+        width=100,
+    )
+    text = "\n".join(lines)
+
+    assert "25/100" in text
+    assert "1.00 repos/min" in text

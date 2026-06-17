@@ -54,8 +54,10 @@ def dashboard_lines(snapshot: dict[str, object], *, width: int) -> list[str]:
     promoted = as_int(snapshot.get("promoted_count"))
     maybe = as_int(snapshot.get("maybe_count"))
     rejected = as_int(snapshot.get("rejected_count"))
+    resumed = as_int(snapshot.get("resumed_count"))
     elapsed = as_float(snapshot.get("elapsed_sec"))
-    rate_per_min = scanned / (elapsed / 60.0) if elapsed > 0 else 0.0
+    new_scanned = max(0, scanned - resumed)
+    rate_per_min = new_scanned / (elapsed / 60.0) if elapsed > 0 else 0.0
     eta = ((total - scanned) / rate_per_min * 60.0) if total > scanned and rate_per_min > 0 else None
 
     phase = phase_text(snapshot)
@@ -91,6 +93,8 @@ def phase_text(snapshot: dict[str, object]) -> str:
         return "starting"
     if event == "repo_start":
         return "scanning repo"
+    if event == "repo_skipped_resume":
+        return "already complete, skipped"
     if event == "tree_done":
         return f"tree fetched ({as_int(snapshot.get('path_count'))} paths)"
     if event == "tree_error":

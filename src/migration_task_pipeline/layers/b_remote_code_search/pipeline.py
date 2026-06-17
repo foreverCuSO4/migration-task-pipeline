@@ -12,7 +12,7 @@ from typing import Callable
 
 from .config import RemoteCodeSearchConfig
 from .github_client import GitHubAccessError, GitHubRateLimitError, GitHubRemoteClient
-from .io import count_csv_records, ensure_parent, iter_csv, write_jsonl_row
+from .io import count_csv_records, ensure_parent, file_has_content, iter_csv, write_jsonl_row
 from .schema import B_CANDIDATE_COLUMNS, normalize_row
 from .scoring import CodeHit, score_repository
 
@@ -30,9 +30,22 @@ class RemoteScreeningOutputs:
     candidates_csv: Path
     log_file: Path
     scanned_count: int
+    resumed_count: int
     promoted_count: int
     maybe_count: int
     rejected_count: int
+
+
+@dataclass(frozen=True)
+class ResumeState:
+    repo_keys: set[str]
+    promoted_count: int = 0
+    maybe_count: int = 0
+    rejected_count: int = 0
+
+    @property
+    def completed_count(self) -> int:
+        return len(self.repo_keys)
 
 
 def run_remote_code_screening(
@@ -45,6 +58,7 @@ def run_remote_code_screening(
     config: RemoteCodeSearchConfig | None = None,
     limit: int | None = None,
     progress_callback: ProgressCallback | None = None,
+    resume: bool = True,
 ) -> RemoteScreeningOutputs:
     config = config or RemoteCodeSearchConfig()
     client = github_client or GitHubRemoteClient.from_env(auth_path=auth_path)
@@ -58,10 +72,13 @@ def run_remote_code_screening(
     ensure_parent(candidates_path)
     ensure_parent(log_path)
 
-    scanned_count = 0
-    promoted_count = 0
-    maybe_count = 0
-    rejected_count = 0
+    resume_state = load_resume_state(candidates_path) if resume else ResumeState(repo_keys=set())
+    completed_repo_keys = set(resume_state.repo_keys)
+    resumed_count = resume_state.completed_count
+    scanned_count = resumed_count
+    promoted_count = resume_state.promoted_count
+    maybe_count = resume_state.maybe_count
+    rejected_count = resume_state.rejected_count
     started = time.monotonic()
     total_count = count_csv_records(seed_csv)
     if limit is not None:
@@ -94,13 +111,14 @@ def run_remote_code_screening(
         )
 
     with (
-        signals_path.open("w", encoding="utf-8") as signals_handle,
-        candidates_path.open("w", encoding="utf-8", newline="") as csv_handle,
-        log_path.open("w", encoding="utf-8") as log_handle,
+        signals_path.open("a" if resume else "w", encoding="utf-8") as signals_handle,
+        candidates_path.open("a" if resume else "w", encoding="utf-8", newline="") as csv_handle,
+        log_path.open("a" if resume else "w", encoding="utf-8") as log_handle,
     ):
         writer = csv.DictWriter(csv_handle, fieldnames=B_CANDIDATE_COLUMNS, extrasaction="ignore")
-        writer.writeheader()
-        csv_handle.flush()
+        if not resume or not file_has_content(candidates_path):
+            writer.writeheader()
+            csv_handle.flush()
         write_log(
             log_handle,
             "start",
@@ -108,6 +126,8 @@ def run_remote_code_screening(
                 "seed_csv": str(seed_csv),
                 "output_root": str(output_root),
                 "limit": limit,
+                "resume_enabled": resume,
+                "resumed_count": resumed_count,
                 "per_page": config.per_page,
                 "max_code_queries_per_repo": config.max_code_queries_per_repo,
                 "use_remote_tree": config.use_remote_tree,
@@ -124,10 +144,12 @@ def run_remote_code_screening(
             signals_jsonl=str(signals_path),
             candidates_csv=str(candidates_path),
             log_file=str(log_path),
+            resume_enabled=resume,
+            resumed_count=resumed_count,
         )
 
         for index, seed_row in enumerate(iter_csv(seed_csv), start=1):
-            if limit is not None and scanned_count >= limit:
+            if limit is not None and index > limit:
                 write_log(log_handle, "limit_reached", {"limit": limit})
                 emit_progress("limit_reached", limit=limit)
                 break
@@ -135,6 +157,12 @@ def run_remote_code_screening(
             current_index = index
             current_repo_key = str(seed_row.get("repo_key") or "")
             repo_key = current_repo_key
+            normalized_repo_key = repo_key.strip().lower()
+            if normalized_repo_key and normalized_repo_key in completed_repo_keys:
+                write_log(log_handle, "repo_skipped_resume", {"index": index, "repo_key": repo_key})
+                emit_progress("repo_skipped_resume")
+                continue
+
             write_log(log_handle, "repo_start", {"index": index, "repo_key": repo_key})
             emit_progress("repo_start")
             repo_started = time.monotonic()
@@ -164,6 +192,8 @@ def run_remote_code_screening(
             write_jsonl_row(signals_handle, evidence)
             writer.writerow(normalize_row(scored, B_CANDIDATE_COLUMNS))
             csv_handle.flush()
+            if normalized_repo_key:
+                completed_repo_keys.add(normalized_repo_key)
 
             scanned_count += 1
             decision = scored.get("b_decision")
@@ -199,6 +229,7 @@ def run_remote_code_screening(
             "finish",
             {
                 "scanned_count": scanned_count,
+                "resumed_count": resumed_count,
                 "promoted_count": promoted_count,
                 "maybe_count": maybe_count,
                 "rejected_count": rejected_count,
@@ -212,6 +243,37 @@ def run_remote_code_screening(
         candidates_csv=candidates_path,
         log_file=log_path,
         scanned_count=scanned_count,
+        resumed_count=resumed_count,
+        promoted_count=promoted_count,
+        maybe_count=maybe_count,
+        rejected_count=rejected_count,
+    )
+
+
+def load_resume_state(candidates_path: str | Path) -> ResumeState:
+    path = Path(candidates_path)
+    if not file_has_content(path):
+        return ResumeState(repo_keys=set())
+
+    repo_keys: set[str] = set()
+    promoted_count = 0
+    maybe_count = 0
+    rejected_count = 0
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            repo_key = str(row.get("repo_key") or "").strip().lower()
+            if not repo_key or repo_key in repo_keys:
+                continue
+            repo_keys.add(repo_key)
+            decision = str(row.get("b_decision") or "").strip()
+            if decision == "promote":
+                promoted_count += 1
+            elif decision == "maybe":
+                maybe_count += 1
+            elif decision == "reject":
+                rejected_count += 1
+    return ResumeState(
+        repo_keys=repo_keys,
         promoted_count=promoted_count,
         maybe_count=maybe_count,
         rejected_count=rejected_count,

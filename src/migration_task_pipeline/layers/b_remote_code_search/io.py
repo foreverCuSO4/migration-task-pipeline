@@ -31,6 +31,10 @@ def count_csv_records(path: str | Path) -> int:
     return count
 
 
+def file_has_content(path: str | Path) -> bool:
+    return Path(path).exists() and Path(path).stat().st_size > 0
+
+
 def write_jsonl_row(handle, row: dict[str, object]) -> None:
     handle.write(json.dumps(row, ensure_ascii=True, sort_keys=True, default=str))
     handle.write("\n")

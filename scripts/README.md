@@ -99,6 +99,13 @@ JSONL evidence row, appends one CSV candidate row, and writes detailed progress
 events to `data/logs/remote-code-screening-YYYYMMDD.log`. This makes long runs
 debuggable while they are still in progress.
 
+Layer B resumes by default. On startup it reads the existing
+`data/processed/repo-candidates-b.csv`, treats complete `repo_key` rows as
+already processed, skips those repositories, and appends new evidence, candidate
+rows, and log events. This uses the candidate CSV as the completion source of
+truth so a crash between evidence and CSV writes cannot hide a missing final
+candidate row. Use `--no-resume` to overwrite B outputs and scan from scratch.
+
 When run in an interactive terminal, Layer B also displays a live dashboard on
 stderr with completion progress, elapsed time, average repositories per minute,
 ETA, decision counts, current repository, and current scan phase. Use

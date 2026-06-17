@@ -52,6 +52,15 @@ def parse_args() -> argparse.Namespace:
         help="Scan only the first N seed rows; useful for smoke tests.",
     )
     parser.add_argument(
+        "--resume",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Resume from an existing repo-candidates-b.csv by skipping completed repo_key rows. "
+            "Enabled by default; use --no-resume to overwrite B outputs and start from scratch."
+        ),
+    )
+    parser.add_argument(
         "--per-page",
         type=int,
         default=5,
@@ -134,6 +143,7 @@ def main() -> int:
             config=config,
             limit=args.limit,
             progress_callback=dashboard,
+            resume=args.resume,
         )
     except Exception as exc:
         if dashboard is not None:
@@ -145,6 +155,7 @@ def main() -> int:
     if dashboard is not None:
         dashboard.close()
     print(f"scanned repos: {outputs.scanned_count}")
+    print(f"resumed repos: {outputs.resumed_count}")
     print(f"promote: {outputs.promoted_count}")
     print(f"maybe: {outputs.maybe_count}")
     print(f"reject: {outputs.rejected_count}")
