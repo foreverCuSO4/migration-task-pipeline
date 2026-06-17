@@ -87,6 +87,17 @@ JSONL evidence row, appends one CSV candidate row, and writes detailed progress
 events to `data/logs/remote-code-screening-YYYYMMDD.log`. This makes long runs
 debuggable while they are still in progress.
 
+When run in an interactive terminal, Layer B also displays a live dashboard on
+stderr with completion progress, elapsed time, average repositories per minute,
+ETA, decision counts, current repository, and current scan phase. Use
+`--dashboard` to force it on or `--no-dashboard` to disable it.
+
 Both Layer A and Layer B rotate GitHub tokens round-robin for API requests. If a
 request gets HTTP 403 or 429 from one token, the same request is retried with
 the next token and fails only after every configured token has failed.
+
+Layer B treats GitHub rate limits as incomplete remote evidence, not as a
+negative repo signal. When all configured tokens are rate limited, the stage
+waits and retries the same API call before scoring the repository. Use
+`--rate-limit-max-retries` to bound this behavior for smoke tests or debugging;
+when omitted, Layer B waits until GitHub allows the request to complete.

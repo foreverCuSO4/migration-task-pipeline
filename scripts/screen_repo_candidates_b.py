@@ -13,6 +13,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from migration_task_pipeline.layers.b_remote_code_search.config import RemoteCodeSearchConfig
+from migration_task_pipeline.layers.b_remote_code_search.dashboard import TerminalDashboard
 from migration_task_pipeline.layers.b_remote_code_search.pipeline import run_remote_code_screening
 
 
@@ -67,6 +68,35 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip remote git tree fetches and rely only on code search.",
     )
+    parser.add_argument(
+        "--rate-limit-max-retries",
+        type=int,
+        default=None,
+        help="Maximum retries for a rate-limited GitHub request. Omit to retry indefinitely.",
+    )
+    parser.add_argument(
+        "--rate-limit-retry-sleep",
+        type=float,
+        default=60.0,
+        help="Fallback sleep seconds between rate-limit retries when GitHub does not provide a reset time.",
+    )
+    parser.add_argument(
+        "--rate-limit-max-sleep",
+        type=float,
+        default=300.0,
+        help="Maximum sleep seconds for one rate-limit retry.",
+    )
+    dashboard_group = parser.add_mutually_exclusive_group()
+    dashboard_group.add_argument(
+        "--dashboard",
+        action="store_true",
+        help="Force the live terminal dashboard even when stderr is not detected as a TTY.",
+    )
+    dashboard_group.add_argument(
+        "--no-dashboard",
+        action="store_true",
+        help="Disable the live terminal dashboard.",
+    )
     return parser.parse_args()
 
 
@@ -87,7 +117,13 @@ def main() -> int:
         per_page=args.per_page,
         max_code_queries_per_repo=args.max_code_queries_per_repo,
         use_remote_tree=not args.no_tree,
+        rate_limit_max_retries=args.rate_limit_max_retries,
+        rate_limit_retry_sleep_seconds=args.rate_limit_retry_sleep,
+        rate_limit_max_sleep_seconds=args.rate_limit_max_sleep,
     )
+    dashboard = None
+    if args.dashboard or (not args.no_dashboard and sys.stderr.isatty()):
+        dashboard = TerminalDashboard()
 
     try:
         outputs = run_remote_code_screening(
@@ -97,11 +133,17 @@ def main() -> int:
             auth_path=args.auth_file,
             config=config,
             limit=args.limit,
+            progress_callback=dashboard,
         )
     except Exception as exc:
+        if dashboard is not None:
+            dashboard({"event": "error", "elapsed_sec": 0, "error": str(exc)})
+            dashboard.close()
         print(f"Layer B screening failed: {exc}", file=sys.stderr)
         return 1
 
+    if dashboard is not None:
+        dashboard.close()
     print(f"scanned repos: {outputs.scanned_count}")
     print(f"promote: {outputs.promoted_count}")
     print(f"maybe: {outputs.maybe_count}")

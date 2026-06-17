@@ -24,6 +24,9 @@ class RemoteCodeSearchConfig:
     use_remote_tree: bool = True
     promote_threshold: float = 0.65
     maybe_threshold: float = 0.45
+    rate_limit_max_retries: int | None = None
+    rate_limit_retry_sleep_seconds: float = 60.0
+    rate_limit_max_sleep_seconds: float = 300.0
 
 
 def quote_search_term(term: str) -> str:
@@ -67,4 +70,3 @@ DEFAULT_CODE_QUERIES = [
     CodeQuerySpec("risk", "flash-attn"),
     CodeQuerySpec("risk", "deepspeed"),
 ]
-

@@ -21,6 +21,16 @@ def iter_csv(path: str | Path) -> Iterator[dict[str, str]]:
         yield from csv.DictReader(handle)
 
 
+def count_csv_records(path: str | Path) -> int:
+    count = 0
+    with Path(path).open("r", encoding="utf-8", newline="") as handle:
+        reader = csv.reader(handle)
+        next(reader, None)
+        for _ in reader:
+            count += 1
+    return count
+
+
 def write_jsonl_row(handle, row: dict[str, object]) -> None:
     handle.write(json.dumps(row, ensure_ascii=True, sort_keys=True, default=str))
     handle.write("\n")

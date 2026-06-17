@@ -1,13 +1,18 @@
 import pytest
 
 from migration_task_pipeline.github_auth import GitHubToken, GitHubTokenPool
-from migration_task_pipeline.layers.b_remote_code_search.github_client import GitHubRemoteClient
+from migration_task_pipeline.layers.b_remote_code_search.github_client import (
+    GitHubAccessError,
+    GitHubRateLimitError,
+    GitHubRemoteClient,
+)
 
 
 class FakeResponse:
-    def __init__(self, status_code, payload):
+    def __init__(self, status_code, payload, headers=None):
         self.status_code = status_code
         self._payload = payload
+        self.headers = headers or {}
 
     def json(self):
         return self._payload
@@ -82,7 +87,7 @@ def test_remote_client_fails_after_all_tokens_are_rate_limited_without_leaking_t
         session=session,
     )
 
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(GitHubRateLimitError) as exc_info:
         client.search_code("torch.cuda repo:owner/repo")
 
     message = str(exc_info.value)
@@ -90,3 +95,32 @@ def test_remote_client_fails_after_all_tokens_are_rate_limited_without_leaking_t
     assert "github-token:HTTP 429" in message
     assert "ghp_first_secret" not in message
     assert "ghp_second_secret" not in message
+
+
+def test_remote_client_rate_limit_error_carries_retry_after_seconds():
+    session = FakeSession(
+        [
+            FakeResponse(429, {"message": "rate limited"}, headers={"Retry-After": "7"}),
+        ]
+    )
+    client = GitHubRemoteClient(token_pool=GitHubTokenPool(["limited"]), session=session)
+
+    with pytest.raises(GitHubRateLimitError) as exc_info:
+        client.search_code("torch.cuda repo:owner/repo")
+
+    assert exc_info.value.retry_after_seconds == 7
+
+
+def test_remote_client_non_rate_limit_403_is_access_error():
+    session = FakeSession(
+        [
+            FakeResponse(403, {"message": "Resource not accessible by personal access token"}),
+        ]
+    )
+    client = GitHubRemoteClient(token_pool=GitHubTokenPool(["bad-scope"]), session=session)
+
+    with pytest.raises(GitHubAccessError) as exc_info:
+        client.search_code("torch.cuda repo:owner/repo")
+
+    assert "Resource not accessible" in str(exc_info.value)
+    assert "bad-scope" not in str(exc_info.value)
