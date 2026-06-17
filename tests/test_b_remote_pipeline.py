@@ -1,6 +1,8 @@
 import csv
 import json
 
+import requests
+
 from migration_task_pipeline.layers.b_remote_code_search.config import RemoteCodeSearchConfig
 from migration_task_pipeline.layers.b_remote_code_search.github_client import GitHubAccessError, GitHubRateLimitError
 from migration_task_pipeline.layers.b_remote_code_search.pipeline import RemoteScanIncomplete, run_remote_code_screening
@@ -52,6 +54,29 @@ class RateLimitedThenOkClient(FakeGitHubRemoteClient):
 class AlwaysRateLimitedClient(FakeGitHubRemoteClient):
     def search_code(self, query, *, per_page=5, page=1):
         raise GitHubRateLimitError("GitHub rate limit for all tokens", retry_after_seconds=0)
+
+
+class TransientThenOkClient(FakeGitHubRemoteClient):
+    def __init__(self):
+        self.search_calls = 0
+
+    def search_code(self, query, *, per_page=5, page=1):
+        self.search_calls += 1
+        if self.search_calls == 1:
+            raise requests.exceptions.SSLError("temporary SSL EOF")
+        return {
+            "items": [
+                {"path": "src/cuda_a.py", "html_url": "https://example/src/cuda_a.py"},
+                {"path": "src/cuda_b.py", "html_url": "https://example/src/cuda_b.py"},
+                {"path": "src/cuda_c.py", "html_url": "https://example/src/cuda_c.py"},
+                {"path": "src/cuda_d.py", "html_url": "https://example/src/cuda_d.py"},
+            ]
+        }
+
+
+class AlwaysTransientClient(FakeGitHubRemoteClient):
+    def search_code(self, query, *, per_page=5, page=1):
+        raise requests.exceptions.ConnectionError("temporary connection reset")
 
 
 class AccessDeniedClient(FakeGitHubRemoteClient):
@@ -199,6 +224,32 @@ def test_remote_code_screening_retries_rate_limit_before_scoring(tmp_path):
     assert '"event": "rate_limit_retry"' in outputs.log_file.read_text(encoding="utf-8")
 
 
+def test_remote_code_screening_retries_transient_errors_before_scoring(tmp_path):
+    seed_csv = write_seed_csv(tmp_path)
+    client = TransientThenOkClient()
+
+    outputs = run_remote_code_screening(
+        seed_csv,
+        output_root=tmp_path,
+        run_date="20260617",
+        github_client=client,
+        config=RemoteCodeSearchConfig(
+            per_page=5,
+            max_code_queries_per_repo=1,
+            transient_error_max_retries=1,
+            transient_error_retry_sleep_seconds=0,
+            transient_error_max_sleep_seconds=0,
+        ),
+    )
+
+    rows = list(csv.DictReader(outputs.candidates_csv.open(encoding="utf-8", newline="")))
+    assert outputs.scanned_count == 1
+    assert client.search_calls == 2
+    assert rows[0]["b_decision"] == "maybe"
+    assert rows[0]["b_errors"] == ""
+    assert '"event": "transient_error_retry"' in outputs.log_file.read_text(encoding="utf-8")
+
+
 def test_remote_code_screening_does_not_write_reject_when_rate_limit_retries_are_exhausted(tmp_path):
     seed_csv = write_seed_csv(tmp_path)
 
@@ -214,6 +265,32 @@ def test_remote_code_screening_does_not_write_reject_when_rate_limit_retries_are
                 rate_limit_max_retries=1,
                 rate_limit_retry_sleep_seconds=0,
                 rate_limit_max_sleep_seconds=0,
+            ),
+        )
+    except RemoteScanIncomplete:
+        pass
+    else:
+        raise AssertionError("expected RemoteScanIncomplete")
+
+    rows = list(csv.DictReader((tmp_path / "processed" / "repo-candidates-b.csv").open(encoding="utf-8", newline="")))
+    assert rows == []
+
+
+def test_remote_code_screening_does_not_write_reject_when_transient_retries_are_exhausted(tmp_path):
+    seed_csv = write_seed_csv(tmp_path)
+
+    try:
+        run_remote_code_screening(
+            seed_csv,
+            output_root=tmp_path,
+            run_date="20260617",
+            github_client=AlwaysTransientClient(),
+            config=RemoteCodeSearchConfig(
+                per_page=5,
+                max_code_queries_per_repo=1,
+                transient_error_max_retries=1,
+                transient_error_retry_sleep_seconds=0,
+                transient_error_max_sleep_seconds=0,
             ),
         )
     except RemoteScanIncomplete:

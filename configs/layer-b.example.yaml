@@ -18,8 +18,15 @@ remote_code_search:
   rate_limit:
     # null means wait indefinitely until GitHub allows the request.
     max_retries: null
-    retry_sleep_seconds: 60.0
+    retry_sleep_seconds: 30.0
     max_sleep_seconds: 300.0
+
+  transient_error:
+    # Retries for temporary requests/urllib3 failures such as Timeout,
+    # ConnectionError, SSLError, and ChunkedEncodingError.
+    max_retries: 3
+    retry_sleep_seconds: 5.0
+    max_sleep_seconds: 60.0
 
   code_queries:
     - group: cuda

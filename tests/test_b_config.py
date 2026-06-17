@@ -18,6 +18,10 @@ remote_code_search:
     max_retries: 5
     retry_sleep_seconds: 12.5
     max_sleep_seconds: 90
+  transient_error:
+    max_retries: 4
+    retry_sleep_seconds: 2.5
+    max_sleep_seconds: 30
   code_queries:
     - group: cuda
       term: torch.cuda
@@ -40,6 +44,9 @@ runtime:
     assert config.remote_code_search.rate_limit_max_retries == 5
     assert config.remote_code_search.rate_limit_retry_sleep_seconds == 12.5
     assert config.remote_code_search.rate_limit_max_sleep_seconds == 90
+    assert config.remote_code_search.transient_error_max_retries == 4
+    assert config.remote_code_search.transient_error_retry_sleep_seconds == 2.5
+    assert config.remote_code_search.transient_error_max_sleep_seconds == 30
     assert [query.term for query in config.remote_code_search.code_queries] == [
         "torch.cuda",
         "console_scripts",
@@ -60,6 +67,10 @@ remote_code_search:
     max_retries: 5
     retry_sleep_seconds: 12.5
     max_sleep_seconds: 90
+  transient_error:
+    max_retries: 4
+    retry_sleep_seconds: 2.5
+    max_sleep_seconds: 30
 runtime:
   dashboard: off
 """,
@@ -73,6 +84,9 @@ runtime:
         rate_limit_max_retries=None,
         rate_limit_retry_sleep=1.5,
         rate_limit_max_sleep=None,
+        transient_error_max_retries=8,
+        transient_error_retry_sleep=None,
+        transient_error_max_sleep=45,
         dashboard=True,
     )
 
@@ -84,4 +98,7 @@ runtime:
     assert remote_config.rate_limit_max_retries == 5
     assert remote_config.rate_limit_retry_sleep_seconds == 1.5
     assert remote_config.rate_limit_max_sleep_seconds == 90
+    assert remote_config.transient_error_max_retries == 8
+    assert remote_config.transient_error_retry_sleep_seconds == 2.5
+    assert remote_config.transient_error_max_sleep_seconds == 45
     assert resolve_dashboard_enabled(layer_config, args, stderr_isatty=False) is True

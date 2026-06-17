@@ -48,3 +48,24 @@ def test_dashboard_rate_excludes_resumed_repos():
 
     assert "25/100" in text
     assert "1.00 repos/min" in text
+
+
+def test_dashboard_labels_transient_error_sleep_as_network_wait():
+    lines = dashboard_lines(
+        {
+            "event": "transient_error_sleep",
+            "total_count": 10,
+            "scanned_count": 1,
+            "current_index": 2,
+            "current_repo_key": "owner/repo",
+            "elapsed_sec": 60,
+            "retry_count": 1,
+            "sleep_remaining_sec": 5,
+        },
+        width=100,
+    )
+    text = "\n".join(lines)
+
+    assert "network error" in text
+    assert "Network" in text
+    assert "RateLimit" not in text

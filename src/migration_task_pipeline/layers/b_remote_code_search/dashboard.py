@@ -79,7 +79,8 @@ def dashboard_lines(snapshot: dict[str, object], *, width: int) -> list[str]:
         lines.append(f"Last       {decision}   score {format_score(b_score)}")
     if snapshot.get("sleep_remaining_sec") is not None:
         remaining = as_float(snapshot.get("sleep_remaining_sec"))
-        lines.append(f"RateLimit  waiting {format_duration(remaining)} before retry")
+        label = "Network" if str(snapshot.get("event") or "") == "transient_error_sleep" else "RateLimit"
+        lines.append(f"{label:<10} waiting {format_duration(remaining)} before retry")
     return [fit_line(line, width) for line in lines]
 
 
@@ -109,6 +110,10 @@ def phase_text(snapshot: dict[str, object]) -> str:
         return f"rate limited, retry {as_int(retry_count)}"
     if event == "rate_limit_sleep":
         return f"waiting for rate limit reset, retry {as_int(retry_count)}"
+    if event == "transient_error_retry":
+        return f"network error, retry {as_int(retry_count)}"
+    if event == "transient_error_sleep":
+        return f"waiting after network error, retry {as_int(retry_count)}"
     if event == "repo_done":
         return "repo complete"
     if event == "limit_reached":

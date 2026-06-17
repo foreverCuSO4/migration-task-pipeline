@@ -10,6 +10,8 @@ import json
 import time
 from typing import Callable
 
+import requests
+
 from .config import RemoteCodeSearchConfig
 from .github_client import GitHubAccessError, GitHubRateLimitError, GitHubRemoteClient
 from .io import count_csv_records, ensure_parent, file_has_content, iter_csv, write_jsonl_row
@@ -19,6 +21,14 @@ from .scoring import CodeHit, score_repository
 
 class RemoteScanIncomplete(RuntimeError):
     """Raised when Layer B cannot collect complete remote evidence."""
+
+
+TRANSIENT_REQUEST_EXCEPTIONS = (
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.SSLError,
+    requests.exceptions.ChunkedEncodingError,
+)
 
 
 ProgressCallback = Callable[[dict[str, object]], None]
@@ -134,6 +144,9 @@ def run_remote_code_screening(
                 "rate_limit_max_retries": config.rate_limit_max_retries,
                 "rate_limit_retry_sleep_seconds": config.rate_limit_retry_sleep_seconds,
                 "rate_limit_max_sleep_seconds": config.rate_limit_max_sleep_seconds,
+                "transient_error_max_retries": config.transient_error_max_retries,
+                "transient_error_retry_sleep_seconds": config.transient_error_retry_sleep_seconds,
+                "transient_error_max_sleep_seconds": config.transient_error_max_sleep_seconds,
                 "total_count": total_count,
             },
         )
@@ -305,7 +318,7 @@ def scan_seed_row(
 
     if config.use_remote_tree:
         try:
-            tree_payload = call_with_rate_limit_retry(
+            tree_payload = call_with_remote_retry(
                 lambda: client.get_tree(repo_key, default_branch),
                 config=config,
                 log_handle=log_handle,
@@ -335,7 +348,7 @@ def scan_seed_row(
             query=query,
         )
         try:
-            payload = call_with_rate_limit_retry(
+            payload = call_with_remote_retry(
                 lambda: client.search_code(query, per_page=config.per_page, page=1),
                 config=config,
                 log_handle=log_handle,
@@ -405,7 +418,7 @@ def scan_seed_row(
     }
 
 
-def call_with_rate_limit_retry(
+def call_with_remote_retry(
     operation_call,
     *,
     config: RemoteCodeSearchConfig,
@@ -416,13 +429,17 @@ def call_with_rate_limit_retry(
     term: str | None = None,
     query: str | None = None,
 ) -> dict[str, object]:
-    retry_count = 0
+    rate_limit_retry_count = 0
+    transient_retry_count = 0
     while True:
         try:
             return operation_call()
         except GitHubRateLimitError as exc:
-            retry_count += 1
-            if config.rate_limit_max_retries is not None and retry_count > config.rate_limit_max_retries:
+            rate_limit_retry_count += 1
+            if (
+                config.rate_limit_max_retries is not None
+                and rate_limit_retry_count > config.rate_limit_max_retries
+            ):
                 raise RemoteScanIncomplete(
                     f"{operation}_rate_limit_exhausted after {config.rate_limit_max_retries} retries: {exc}"
                 ) from exc
@@ -436,7 +453,7 @@ def call_with_rate_limit_retry(
                     "operation": operation,
                     "term": term,
                     "query": query,
-                    "retry_count": retry_count,
+                    "retry_count": rate_limit_retry_count,
                     "sleep_seconds": sleep_seconds,
                     "error": str(exc),
                 },
@@ -448,7 +465,7 @@ def call_with_rate_limit_retry(
                 operation=operation,
                 term=term,
                 query=query,
-                retry_count=retry_count,
+                retry_count=rate_limit_retry_count,
                 sleep_seconds=sleep_seconds,
                 error=str(exc),
             )
@@ -459,7 +476,54 @@ def call_with_rate_limit_retry(
                 operation=operation,
                 term=term,
                 query=query,
-                retry_count=retry_count,
+                retry_count=rate_limit_retry_count,
+            )
+        except TRANSIENT_REQUEST_EXCEPTIONS as exc:
+            transient_retry_count += 1
+            if transient_retry_count > config.transient_error_max_retries:
+                raise RemoteScanIncomplete(
+                    (
+                        f"{operation}_transient_error_exhausted after "
+                        f"{config.transient_error_max_retries} retries: {exc}"
+                    )
+                ) from exc
+
+            sleep_seconds = transient_error_sleep_seconds(config)
+            write_log(
+                log_handle,
+                "transient_error_retry",
+                {
+                    "repo_key": repo_key,
+                    "operation": operation,
+                    "term": term,
+                    "query": query,
+                    "retry_count": transient_retry_count,
+                    "sleep_seconds": sleep_seconds,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            emit_scan_progress(
+                progress_callback,
+                "transient_error_retry",
+                repo_key=repo_key,
+                operation=operation,
+                term=term,
+                query=query,
+                retry_count=transient_retry_count,
+                sleep_seconds=sleep_seconds,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            sleep_with_progress(
+                sleep_seconds,
+                progress_callback=progress_callback,
+                repo_key=repo_key,
+                operation=operation,
+                term=term,
+                query=query,
+                retry_count=transient_retry_count,
+                sleep_event="transient_error_sleep",
             )
 
 
@@ -468,6 +532,13 @@ def rate_limit_sleep_seconds(exc: GitHubRateLimitError, config: RemoteCodeSearch
     if suggested is None:
         suggested = config.rate_limit_retry_sleep_seconds
     return min(max(0.0, float(suggested)), max(0.0, float(config.rate_limit_max_sleep_seconds)))
+
+
+def transient_error_sleep_seconds(config: RemoteCodeSearchConfig) -> float:
+    return min(
+        max(0.0, float(config.transient_error_retry_sleep_seconds)),
+        max(0.0, float(config.transient_error_max_sleep_seconds)),
+    )
 
 
 def sleep_with_progress(
@@ -479,6 +550,7 @@ def sleep_with_progress(
     term: str | None,
     query: str | None,
     retry_count: int,
+    sleep_event: str = "rate_limit_sleep",
 ) -> None:
     if sleep_seconds <= 0:
         return
@@ -493,7 +565,7 @@ def sleep_with_progress(
             return
         emit_scan_progress(
             progress_callback,
-            "rate_limit_sleep",
+            sleep_event,
             repo_key=repo_key,
             operation=operation,
             term=term,

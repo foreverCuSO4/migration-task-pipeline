@@ -113,6 +113,24 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Maximum sleep seconds for one rate-limit retry. Overrides config.",
     )
+    parser.add_argument(
+        "--transient-error-max-retries",
+        type=int,
+        default=None,
+        help="Maximum retries for transient network/SSL errors. Overrides config.",
+    )
+    parser.add_argument(
+        "--transient-error-retry-sleep",
+        type=float,
+        default=None,
+        help="Sleep seconds between transient network/SSL retries. Overrides config.",
+    )
+    parser.add_argument(
+        "--transient-error-max-sleep",
+        type=float,
+        default=None,
+        help="Maximum sleep seconds for one transient network/SSL retry. Overrides config.",
+    )
     dashboard_group = parser.add_mutually_exclusive_group()
     dashboard_group.add_argument(
         "--dashboard",
@@ -167,6 +185,21 @@ def build_remote_code_search_config(
         ),
         rate_limit_max_sleep_seconds=(
             args.rate_limit_max_sleep if args.rate_limit_max_sleep is not None else base.rate_limit_max_sleep_seconds
+        ),
+        transient_error_max_retries=(
+            args.transient_error_max_retries
+            if args.transient_error_max_retries is not None
+            else base.transient_error_max_retries
+        ),
+        transient_error_retry_sleep_seconds=(
+            args.transient_error_retry_sleep
+            if args.transient_error_retry_sleep is not None
+            else base.transient_error_retry_sleep_seconds
+        ),
+        transient_error_max_sleep_seconds=(
+            args.transient_error_max_sleep
+            if args.transient_error_max_sleep is not None
+            else base.transient_error_max_sleep_seconds
         ),
     )
 

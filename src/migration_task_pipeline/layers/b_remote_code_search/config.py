@@ -37,6 +37,9 @@ class RemoteCodeSearchConfig:
     rate_limit_max_retries: int | None = None
     rate_limit_retry_sleep_seconds: float = 60.0
     rate_limit_max_sleep_seconds: float = 300.0
+    transient_error_max_retries: int = 3
+    transient_error_retry_sleep_seconds: float = 5.0
+    transient_error_max_sleep_seconds: float = 60.0
 
 
 @dataclass(frozen=True)
@@ -73,6 +76,9 @@ def load_layer_b_config(path: str | Path) -> LayerBConfig:
     rate_limit_raw = remote_raw.get("rate_limit") or {}
     if not isinstance(rate_limit_raw, dict):
         raise ValueError("remote_code_search.rate_limit must be a mapping")
+    transient_error_raw = remote_raw.get("transient_error") or {}
+    if not isinstance(transient_error_raw, dict):
+        raise ValueError("remote_code_search.transient_error must be a mapping")
 
     remote = RemoteCodeSearchConfig(
         code_queries=parse_code_queries(remote_raw.get("code_queries"), default_remote.code_queries),
@@ -95,6 +101,18 @@ def load_layer_b_config(path: str | Path) -> LayerBConfig:
         rate_limit_max_sleep_seconds=as_float(
             rate_limit_raw.get("max_sleep_seconds"),
             default_remote.rate_limit_max_sleep_seconds,
+        ),
+        transient_error_max_retries=as_int(
+            transient_error_raw.get("max_retries"),
+            default_remote.transient_error_max_retries,
+        ),
+        transient_error_retry_sleep_seconds=as_float(
+            transient_error_raw.get("retry_sleep_seconds"),
+            default_remote.transient_error_retry_sleep_seconds,
+        ),
+        transient_error_max_sleep_seconds=as_float(
+            transient_error_raw.get("max_sleep_seconds"),
+            default_remote.transient_error_max_sleep_seconds,
         ),
     )
     runtime = LayerBRuntimeConfig(
