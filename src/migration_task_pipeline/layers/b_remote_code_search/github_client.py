@@ -2,26 +2,28 @@
 
 from __future__ import annotations
 
-import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import requests
 
+from migration_task_pipeline.github_auth import GitHubTokenPool
+
 
 @dataclass(frozen=True)
 class GitHubRemoteClient:
-    token: str
+    token: str = ""
     session: requests.Session | None = None
     api_base_url: str = "https://api.github.com"
+    token_pool: GitHubTokenPool | None = None
+
+    def __post_init__(self) -> None:
+        if self.token_pool is None:
+            object.__setattr__(self, "token_pool", GitHubTokenPool.from_token(self.token))
 
     @classmethod
     def from_env(cls, *, auth_path: str | Path = "auth.json") -> "GitHubRemoteClient":
-        token = os.getenv("GITHUB_TOKEN") or load_github_api_key(auth_path)
-        if not token:
-            raise RuntimeError("GITHUB_TOKEN or auth.json github_api_key is required for GitHub API access")
-        return cls(token=token)
+        return cls(token_pool=GitHubTokenPool.from_env(auth_path=auth_path))
 
     def search_code(self, query: str, *, per_page: int = 5, page: int = 1) -> dict[str, object]:
         response = self._get(
@@ -42,46 +44,28 @@ class GitHubRemoteClient:
         accept: str = "application/vnd.github+json",
     ) -> dict[str, object]:
         http = self.session or requests.Session()
-        response = http.get(
-            f"{self.api_base_url}{path}",
-            headers={
-                "Accept": accept,
-                "Authorization": f"Bearer {self.token}",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            params=params,
-            timeout=30,
-        )
-        if response.status_code in {403, 429}:
-            raise RuntimeError(f"GitHub rate limit or permission error: HTTP {response.status_code}")
+        pool = self.token_pool
+        assert pool is not None
+        rate_limit_errors = []
+        for _ in range(len(pool)):
+            token = pool.next_token()
+            response = http.get(
+                f"{self.api_base_url}{path}",
+                headers={
+                    "Accept": accept,
+                    "Authorization": f"Bearer {token.token}",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                params=params,
+                timeout=30,
+            )
+            if response.status_code not in {403, 429}:
+                break
+            rate_limit_errors.append(f"{token.label}:HTTP {response.status_code}")
+        else:
+            raise RuntimeError(f"GitHub rate limit or permission error for all tokens: {', '.join(rate_limit_errors)}")
         response.raise_for_status()
         payload = response.json()
         if isinstance(payload, dict):
             return payload
         return {}
-
-
-def load_github_api_key(auth_path: str | Path) -> str:
-    path = Path(auth_path)
-    if not path.exists():
-        return ""
-
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return ""
-
-    candidate_keys = ("github_api_key", "github_token", "github_key")
-    if isinstance(payload, dict):
-        for key in candidate_keys:
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        for value in payload.values():
-            if isinstance(value, dict):
-                for key in candidate_keys:
-                    nested = value.get(key)
-                    if isinstance(nested, str) and nested.strip():
-                        return nested.strip()
-    return ""
-

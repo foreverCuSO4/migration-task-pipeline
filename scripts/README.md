@@ -13,11 +13,21 @@ GITHUB_TOKEN=... python scripts/collect_repo_seeds.py \
   --config configs/seed-sources.example.yaml
 ```
 
-Alternatively, put the token in ignored `auth.json`:
+Alternatively, put one or more tokens in ignored `auth.json`:
 
 ```json
-{"github_api_key": "..."}
+{
+  "github_tokens": [
+    {"name": "token-a", "token": "..."},
+    {"name": "token-b", "token": "..."}
+  ]
+}
 ```
+
+`name` is optional and only used in diagnostics. Legacy single-token keys
+`github_api_key`, `github_token`, and `github_key` are still accepted.
+If `GITHUB_TOKEN` is set, it is used first and then merged with tokens from
+`auth.json`. Duplicate token values are ignored.
 
 When `--output-root` is omitted, each run writes under a timestamped directory:
 
@@ -76,3 +86,7 @@ Layer B is a streaming stage. After each repository finishes, it appends one
 JSONL evidence row, appends one CSV candidate row, and writes detailed progress
 events to `data/logs/remote-code-screening-YYYYMMDD.log`. This makes long runs
 debuggable while they are still in progress.
+
+Both Layer A and Layer B rotate GitHub tokens round-robin for API requests. If a
+request gets HTTP 403 or 429 from one token, the same request is retried with
+the next token and fails only after every configured token has failed.

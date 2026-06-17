@@ -52,7 +52,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--auth-file",
         default="auth.json",
-        help="JSON file containing github_api_key; GITHUB_TOKEN still takes precedence.",
+        help=(
+            "JSON file containing github_tokens or legacy github_api_key; "
+            "GITHUB_TOKEN is merged first when present."
+        ),
     )
     return parser.parse_args()
 
