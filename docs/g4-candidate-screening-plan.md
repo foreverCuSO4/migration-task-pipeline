@@ -65,7 +65,11 @@ Good filters:
 - Drop archived repositories.
 - Drop forks unless there is a specific reason to keep them.
 - Drop repositories with unclear or missing license for normal candidates.
-- Drop very large repositories when they are unlikely to be taskable.
+- Drop very large repositories when they are unlikely to be taskable. As an
+  initial metadata-level rule, repositories below 100 MB are preferred,
+  100-250 MB is acceptable, 250-500 MB is cautionary, and 500 MB or larger
+  should normally be rejected unless there is a strong manual reason to keep
+  them.
 - Downrank tutorials, awesome lists, papers-only lists, docs-only repos, and
   benchmark result collections.
 
@@ -173,6 +177,139 @@ Stage B should answer:
 
 ```text
 Does remote code evidence support spending clone/local-analysis cost?
+```
+
+### Stage B Screening Policy
+
+Stage B should rank repositories for Stage C, not make final G4 decisions. It
+should run a small fixed query pack per repository and record both hits and
+misses.
+
+Recommended B-level score groups:
+
+```text
+b_score =
+  0.25 * executable_cuda_score
+  + 0.25 * interface_signal_score
+  + 0.20 * installability_signal_score
+  + 0.10 * test_example_signal_score
+  + 0.10 * reference_signal_score
+  + 0.10 * repo_manageability_score
+  - risk_signal_penalty
+```
+
+`executable_cuda_score` should weigh hits in source-like paths higher than hits
+in docs, notebooks, issues, examples, or vendored code. A repository with only
+README CUDA mentions should not rank highly.
+
+`interface_signal_score` should look for runnable entry points:
+
+```text
+console_scripts
+argparse.ArgumentParser
+click.command
+typer.Typer
+if __name__ == "__main__"
+main()
+train.py
+eval.py
+infer.py
+predict.py
+```
+
+`installability_signal_score` should look for files that make Stage C setup
+analysis practical:
+
+```text
+pyproject.toml
+setup.py
+setup.cfg
+requirements.txt
+environment.yml
+Dockerfile
+CMakeLists.txt
+```
+
+`repo_manageability_score` should use Stage A GitHub metadata before any clone:
+
+```text
+1.0: github_size_kb <= 100 MB
+0.7: 100 MB < github_size_kb <= 250 MB
+0.3: 250 MB < github_size_kb < 500 MB
+0.0: github_size_kb >= 500 MB
+```
+
+This is only a remote-size proxy. Stage C should re-check the actual checkout
+size, file count, large files, binary/model artifacts, vendored dependencies,
+submodules, and Git LFS usage.
+
+`test_example_signal_score` should look for public smoke paths:
+
+```text
+tests/
+pytest
+examples/
+demo
+notebooks/
+```
+
+`reference_signal_score` should look for CPU/reference hints:
+
+```text
+device == "cpu"
+--device cpu
+map_location="cpu"
+backend
+reference
+baseline
+expected
+fixture
+```
+
+Risk penalties should be soft in Stage B. They should downrank repositories
+instead of immediately rejecting them unless the evidence is clearly fatal.
+
+High-risk signals:
+
+```text
+kaggle
+wandb
+aws s3
+s3://
+gdown
+download_url
+git lfs
+submodule
+deepspeed
+flash-attn
+private
+```
+
+Recommended hard rejects at Stage B are limited to:
+
+- No executable CUDA/GPU signal after the query pack.
+- Only docs/tutorial/list-like hits with no source-code migration surface.
+- Repository metadata from Stage A already marks it archived or too large.
+
+Recommended Stage B outputs:
+
+- `repo_key`
+- `repo_url`
+- per-query hit counts
+- top hit paths
+- source-like hit counts
+- docs/notebook/vendor hit counts
+- grouped scores
+- `b_score`
+- `b_decision`: `promote`, `maybe`, or `reject`
+- `b_reasons`
+
+Initial C-layer budget target:
+
+```text
+promote: top 1000-3000 repositories
+maybe: keep for backfill or manual spot check
+reject: do not clone unless policy changes
 ```
 
 ## Stage C: Local Clone Heuristic Screening
@@ -316,4 +453,3 @@ before a task should be counted as useful.
 - Use agents only after deterministic evidence is available.
 - Keep G4 separate from G0/G1/G2 statistics, because G4 has no Ascend oracle and
   uses external-interface scoring.
-

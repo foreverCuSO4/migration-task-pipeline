@@ -1,16 +1,18 @@
 # Source Code
 
-Reusable pipeline code will live here.
+Reusable pipeline code lives here.
 
-Expected modules (examples):
+The main pipeline is organized by screening layer:
 
-- seed collectors
-- GitHub URL normalization
-- package metadata parsing
-- static repository scanners
+- `migration_task_pipeline.layers.a_seed_collection`: Stage A seed collection,
+  repository metadata screening, normalization, deduplication, and CSV output.
+
+Expected future modules:
+
+- Stage B remote code-search scanners
+- Stage C local repository scanners
+- Stage D agent review job preparation
 - candidate ranking
-- agent job preparation
 - report generation
 
 Keep one-off experiments in `scripts/` until they are stable enough to reuse.
-

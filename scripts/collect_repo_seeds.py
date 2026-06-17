@@ -13,8 +13,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from migration_task_pipeline.config import load_seed_config
-from migration_task_pipeline.pipeline import run_seed_collector_v0
+from migration_task_pipeline.layers.a_seed_collection.config import load_seed_config
+from migration_task_pipeline.layers.a_seed_collection.pipeline import run_seed_collector_v0
 
 DEFAULT_RUN_NAME = "seed-collector-v0"
 
