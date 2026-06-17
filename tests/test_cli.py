@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 from scripts.collect_repo_seeds import resolve_output_root, slugify_run_name
+from scripts.screen_repo_candidates_b import resolve_output_root as resolve_b_output_root
 
 
 def test_resolve_output_root_preserves_explicit_output_root():
@@ -33,3 +34,10 @@ def test_slugify_run_name():
     assert slugify_run_name("GitHub Search Smoke") == "github-search-smoke"
     assert slugify_run_name("  ") == "seed-collector-v0"
 
+
+def test_b_output_root_infers_data_root_from_seed_csv():
+    assert (
+        resolve_b_output_root("runs/example/data/processed/repo-seeds-v0.csv", None)
+        == Path("runs/example/data")
+    )
+    assert resolve_b_output_root("seeds.csv", "out") == Path("out")

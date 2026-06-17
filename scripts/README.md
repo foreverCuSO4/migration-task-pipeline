@@ -47,3 +47,32 @@ snapshot after all enabled sources finish so aggregate fields remain complete.
 The pipeline writes raw GitHub search results to `data/raw/`, normalized
 repository URLs to `data/interim/`, GitHub metadata to `data/interim/`, and the
 final seed table to `data/processed/repo-seeds-v0.csv`.
+
+## Layer B Remote Code Screening
+
+Run the remote code-search screening stage on a seed CSV:
+
+```bash
+python scripts/screen_repo_candidates_b.py \
+  --seed-csv runs/<run>/data/processed/repo-seeds-v0.csv \
+  --auth-file auth.json
+```
+
+For a smoke test, limit the number of rows:
+
+```bash
+python scripts/screen_repo_candidates_b.py \
+  --seed-csv runs/<run>/data/processed/repo-seeds-v0.csv \
+  --limit 20 \
+  --auth-file auth.json
+```
+
+When `--output-root` is omitted, the script writes into the same `data/` root as
+the seed CSV. It writes remote evidence to
+`data/interim/github-code-signals-YYYYMMDD.jsonl` and ranked candidates to
+`data/processed/repo-candidates-b.csv`.
+
+Layer B is a streaming stage. After each repository finishes, it appends one
+JSONL evidence row, appends one CSV candidate row, and writes detailed progress
+events to `data/logs/remote-code-screening-YYYYMMDD.log`. This makes long runs
+debuggable while they are still in progress.

@@ -1,6 +1,6 @@
 import pytest
 
-from migration_task_pipeline.github_metadata import (
+from migration_task_pipeline.layers.a_seed_collection.github_metadata import (
     GitHubClient,
     enrich_repositories,
     has_complete_github_metadata,

@@ -1,4 +1,4 @@
-from migration_task_pipeline.github_urls import extract_github_urls, normalize_github_url
+from migration_task_pipeline.layers.a_seed_collection.github_urls import extract_github_urls, normalize_github_url
 
 
 def test_normalize_common_github_variants():
@@ -33,4 +33,3 @@ def test_extract_github_urls_from_text_dedupes_and_ignores_org_only_links():
 def test_normalize_rejects_non_repo_urls():
     assert normalize_github_url("https://github.com/owner") is None
     assert normalize_github_url("https://example.com/owner/repo") is None
-

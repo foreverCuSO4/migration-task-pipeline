@@ -1,10 +1,10 @@
-from migration_task_pipeline.collectors.github_search import (
+from migration_task_pipeline.layers.a_seed_collection.collectors.github_search import (
     collect_github_search_records,
     iter_query_frontier,
     rows_to_seed_records as github_search_rows,
     search_github_repositories,
 )
-from migration_task_pipeline.config import GitHubSearchConfig, load_seed_config
+from migration_task_pipeline.layers.a_seed_collection.config import GitHubSearchConfig, load_seed_config
 
 
 def test_github_search_rows_use_repo_fields_without_package_metadata():
@@ -134,4 +134,4 @@ def test_example_config_loads_github_search_source():
     assert config.github_search.enabled
     assert len(config.github_search.keywords) == 12
     assert config.goal.enabled
-    assert config.goal.target_processed_repos == 100
+    assert config.goal.target_processed_repos == 10000

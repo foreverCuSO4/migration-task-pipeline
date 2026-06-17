@@ -1,5 +1,5 @@
-from migration_task_pipeline.config import GitHubSearchConfig, GoalConfig, SeedConfig
-from migration_task_pipeline.pipeline import run_seed_collector_v0
+from migration_task_pipeline.layers.a_seed_collection.config import GitHubSearchConfig, GoalConfig, SeedConfig
+from migration_task_pipeline.layers.a_seed_collection.pipeline import run_seed_collector_v0
 
 
 class FakeGitHubClient:
@@ -42,7 +42,10 @@ def test_pipeline_writes_expected_artifacts(tmp_path, monkeypatch):
             "size": 100,
         }
 
-    monkeypatch.setattr("migration_task_pipeline.pipeline.search_github_repositories", fake_github_search_raw_rows)
+    monkeypatch.setattr(
+        "migration_task_pipeline.layers.a_seed_collection.pipeline.search_github_repositories",
+        fake_github_search_raw_rows,
+    )
 
     outputs = run_seed_collector_v0(
         SeedConfig(github_search=GitHubSearchConfig(enabled=True)),
@@ -84,7 +87,10 @@ def test_pipeline_enriches_each_candidate_before_collecting_next_raw_row(tmp_pat
             "topics": ["cuda"],
         }
 
-    monkeypatch.setattr("migration_task_pipeline.pipeline.search_github_repositories", fake_github_search_raw_rows)
+    monkeypatch.setattr(
+        "migration_task_pipeline.layers.a_seed_collection.pipeline.search_github_repositories",
+        fake_github_search_raw_rows,
+    )
 
     run_seed_collector_v0(
         SeedConfig(github_search=GitHubSearchConfig(enabled=True)),
@@ -115,7 +121,10 @@ def test_pipeline_stops_when_goal_processed_count_is_reached(tmp_path, monkeypat
                 "topics": ["cuda"],
             }
 
-    monkeypatch.setattr("migration_task_pipeline.pipeline.search_github_repositories", fake_github_search_raw_rows)
+    monkeypatch.setattr(
+        "migration_task_pipeline.layers.a_seed_collection.pipeline.search_github_repositories",
+        fake_github_search_raw_rows,
+    )
 
     outputs = run_seed_collector_v0(
         SeedConfig(

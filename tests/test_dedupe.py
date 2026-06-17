@@ -1,4 +1,4 @@
-from migration_task_pipeline.dedupe import dedupe_seed_records
+from migration_task_pipeline.layers.a_seed_collection.dedupe import dedupe_seed_records
 
 
 def test_dedupe_merges_sources_and_prefers_stronger_provenance():
