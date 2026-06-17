@@ -223,6 +223,42 @@ def test_github_client_retries_rate_limited_token_with_next_token():
     ]
 
 
+def test_github_client_retries_bad_credentials_with_next_token():
+    session = FakeSession(
+        [
+            FakeResponse(401, {"message": "Bad credentials"}),
+            FakeResponse(200, {"items": [{"full_name": "owner/repo"}]}),
+        ]
+    )
+    client = GitHubClient(token_pool=GitHubTokenPool(["bad", "ok"]), session=session)
+
+    payload = client.search_repositories("cuda", per_page=1, page=1, sort="stars", order="desc")
+
+    assert payload["items"][0]["full_name"] == "owner/repo"
+    assert [headers["Authorization"] for headers in session.headers_seen] == [
+        "Bearer bad",
+        "Bearer ok",
+    ]
+
+
+def test_github_client_retries_fine_grained_access_error_with_next_token():
+    session = FakeSession(
+        [
+            FakeResponse(403, {"message": "Resource not accessible by personal access token"}),
+            FakeResponse(200, {"items": [{"full_name": "owner/repo"}]}),
+        ]
+    )
+    client = GitHubClient(token_pool=GitHubTokenPool(["bad-scope", "ok"]), session=session)
+
+    payload = client.search_repositories("cuda", per_page=1, page=1, sort="stars", order="desc")
+
+    assert payload["items"][0]["full_name"] == "owner/repo"
+    assert [headers["Authorization"] for headers in session.headers_seen] == [
+        "Bearer bad-scope",
+        "Bearer ok",
+    ]
+
+
 def test_github_client_fails_after_all_tokens_are_rate_limited_without_leaking_tokens():
     session = FakeSession(
         [
@@ -246,5 +282,34 @@ def test_github_client_fails_after_all_tokens_are_rate_limited_without_leaking_t
     message = str(exc_info.value)
     assert "first:HTTP 403" in message
     assert "github-token:HTTP 429" in message
+    assert "ghp_first_secret" not in message
+    assert "ghp_second_secret" not in message
+
+
+def test_github_client_fails_after_all_tokens_have_access_errors_without_leaking_tokens():
+    session = FakeSession(
+        [
+            FakeResponse(401, {"message": "Bad credentials"}),
+            FakeResponse(403, {"message": "Resource not accessible by personal access token"}),
+        ]
+    )
+    client = GitHubClient(
+        token_pool=GitHubTokenPool(
+            [
+                GitHubToken(token="ghp_first_secret", name="first"),
+                GitHubToken(token="ghp_second_secret", name="ghp_second_secret"),
+            ]
+        ),
+        session=session,
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        client.search_repositories("cuda", per_page=1, page=1, sort="stars", order="desc")
+
+    message = str(exc_info.value)
+    assert "first:HTTP 401" in message
+    assert "github-token:HTTP 403" in message
+    assert "Bad credentials" in message
+    assert "Resource not accessible" in message
     assert "ghp_first_secret" not in message
     assert "ghp_second_secret" not in message

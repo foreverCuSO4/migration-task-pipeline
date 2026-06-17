@@ -88,6 +88,7 @@ class GitHubClient:
         pool = self.token_pool
         assert pool is not None
         rate_limit_errors = []
+        access_errors = []
         for _ in range(len(pool)):
             token = pool.next_token()
             response = http.get(
@@ -100,10 +101,39 @@ class GitHubClient:
                 params=params,
                 timeout=timeout,
             )
+            if is_token_access_error_response(response):
+                message = response_json_message(response)
+                detail = f": {message}" if message else ""
+                access_errors.append(f"{token.label}:HTTP {response.status_code}{detail}")
+                continue
             if response.status_code not in {403, 429}:
                 return response
             rate_limit_errors.append(f"{token.label}:HTTP {response.status_code}")
-        raise RuntimeError(f"GitHub rate limit or permission error for all tokens: {', '.join(rate_limit_errors)}")
+        details = []
+        if rate_limit_errors:
+            details.append(f"rate/permission: {', '.join(rate_limit_errors)}")
+        if access_errors:
+            details.append(f"access: {', '.join(access_errors)}")
+        raise RuntimeError(f"GitHub rate limit or permission error for all tokens: {'; '.join(details)}")
+
+
+def is_token_access_error_response(response: requests.Response) -> bool:
+    if response.status_code == 401:
+        return True
+    if response.status_code != 403:
+        return False
+    message = response_json_message(response).lower()
+    return "resource not accessible by personal access token" in message
+
+
+def response_json_message(response: requests.Response) -> str:
+    try:
+        payload = response.json()
+    except Exception:
+        return ""
+    if isinstance(payload, dict):
+        return str(payload.get("message") or "")
+    return ""
 
 
 def enrich_repositories(

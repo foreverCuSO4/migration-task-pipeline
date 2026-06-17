@@ -61,6 +61,7 @@ class GitHubRemoteClient:
         assert pool is not None
         rate_limit_errors = []
         retry_after_seconds = []
+        access_errors = []
         for _ in range(len(pool)):
             token = pool.next_token()
             response = http.get(
@@ -74,17 +75,25 @@ class GitHubRemoteClient:
                 timeout=30,
             )
             if not is_rate_limited_response(response):
+                if is_token_access_error_response(response):
+                    message = response_json_message(response)
+                    detail = f": {message}" if message else ""
+                    access_errors.append(f"{token.label}:HTTP {response.status_code}{detail}")
+                    continue
                 break
             rate_limit_errors.append(f"{token.label}:HTTP {response.status_code}")
             retry_after = response_retry_after_seconds(response)
             if retry_after is not None:
                 retry_after_seconds.append(retry_after)
         else:
-            retry_after = max(retry_after_seconds) if retry_after_seconds else None
-            raise GitHubRateLimitError(
-                f"GitHub rate limit for all tokens: {', '.join(rate_limit_errors)}",
-                retry_after_seconds=retry_after,
-            )
+            if rate_limit_errors:
+                retry_after = max(retry_after_seconds) if retry_after_seconds else None
+                access_detail = f"; access errors: {', '.join(access_errors)}" if access_errors else ""
+                raise GitHubRateLimitError(
+                    f"GitHub rate limit for available tokens: {', '.join(rate_limit_errors)}{access_detail}",
+                    retry_after_seconds=retry_after,
+                )
+            raise GitHubAccessError(f"GitHub API access error for all tokens: {', '.join(access_errors)}")
         if response.status_code in {401, 403}:
             message = response_json_message(response)
             detail = f": {message}" if message else ""
@@ -106,6 +115,15 @@ def is_rate_limited_response(response: requests.Response) -> bool:
         return True
     message = response_json_message(response).lower()
     return "rate limit" in message or "secondary rate limit" in message or "abuse detection" in message
+
+
+def is_token_access_error_response(response: requests.Response) -> bool:
+    if response.status_code == 401:
+        return True
+    if response.status_code != 403:
+        return False
+    message = response_json_message(response).lower()
+    return "resource not accessible by personal access token" in message
 
 
 def response_retry_after_seconds(response: requests.Response) -> float | None:

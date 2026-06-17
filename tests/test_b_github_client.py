@@ -70,6 +70,42 @@ def test_remote_client_retries_rate_limited_token_with_next_token():
     ]
 
 
+def test_remote_client_retries_bad_credentials_with_next_token():
+    session = FakeSession(
+        [
+            FakeResponse(401, {"message": "Bad credentials"}),
+            FakeResponse(200, {"items": [{"path": "src/model.py"}]}),
+        ]
+    )
+    client = GitHubRemoteClient(token_pool=GitHubTokenPool(["bad", "ok"]), session=session)
+
+    payload = client.search_code("torch.cuda repo:owner/repo")
+
+    assert payload["items"][0]["path"] == "src/model.py"
+    assert [headers["Authorization"] for headers in session.headers_seen] == [
+        "Bearer bad",
+        "Bearer ok",
+    ]
+
+
+def test_remote_client_retries_fine_grained_access_error_with_next_token():
+    session = FakeSession(
+        [
+            FakeResponse(403, {"message": "Resource not accessible by personal access token"}),
+            FakeResponse(200, {"items": [{"path": "src/model.py"}]}),
+        ]
+    )
+    client = GitHubRemoteClient(token_pool=GitHubTokenPool(["bad-scope", "ok"]), session=session)
+
+    payload = client.search_code("torch.cuda repo:owner/repo")
+
+    assert payload["items"][0]["path"] == "src/model.py"
+    assert [headers["Authorization"] for headers in session.headers_seen] == [
+        "Bearer bad-scope",
+        "Bearer ok",
+    ]
+
+
 def test_remote_client_fails_after_all_tokens_are_rate_limited_without_leaking_tokens():
     session = FakeSession(
         [
@@ -95,6 +131,53 @@ def test_remote_client_fails_after_all_tokens_are_rate_limited_without_leaking_t
     assert "github-token:HTTP 429" in message
     assert "ghp_first_secret" not in message
     assert "ghp_second_secret" not in message
+
+
+def test_remote_client_fails_after_all_tokens_have_access_errors_without_leaking_tokens():
+    session = FakeSession(
+        [
+            FakeResponse(401, {"message": "Bad credentials"}),
+            FakeResponse(403, {"message": "Resource not accessible by personal access token"}),
+        ]
+    )
+    client = GitHubRemoteClient(
+        token_pool=GitHubTokenPool(
+            [
+                GitHubToken(token="ghp_first_secret", name="first"),
+                GitHubToken(token="ghp_second_secret", name="ghp_second_secret"),
+            ]
+        ),
+        session=session,
+    )
+
+    with pytest.raises(GitHubAccessError) as exc_info:
+        client.search_code("torch.cuda repo:owner/repo")
+
+    message = str(exc_info.value)
+    assert "first:HTTP 401" in message
+    assert "github-token:HTTP 403" in message
+    assert "Bad credentials" in message
+    assert "Resource not accessible" in message
+    assert "ghp_first_secret" not in message
+    assert "ghp_second_secret" not in message
+
+
+def test_remote_client_treats_mixed_access_errors_and_rate_limits_as_rate_limited():
+    session = FakeSession(
+        [
+            FakeResponse(401, {"message": "Bad credentials"}),
+            FakeResponse(429, {"message": "rate limited"}, headers={"Retry-After": "7"}),
+        ]
+    )
+    client = GitHubRemoteClient(token_pool=GitHubTokenPool(["bad", "limited"]), session=session)
+
+    with pytest.raises(GitHubRateLimitError) as exc_info:
+        client.search_code("torch.cuda repo:owner/repo")
+
+    assert exc_info.value.retry_after_seconds == 7
+    assert "access errors" in str(exc_info.value)
+    assert "Bearer bad" in [headers["Authorization"] for headers in session.headers_seen]
+    assert "Bearer limited" in [headers["Authorization"] for headers in session.headers_seen]
 
 
 def test_remote_client_rate_limit_error_carries_retry_after_seconds():
