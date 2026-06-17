@@ -28,8 +28,8 @@ github_search:
 
 goal:
   enabled: true
-  target_processed_repos: 100
-  max_search_requests: 1000
+  target_processed_repos: 10000
+  max_search_requests: 100000
 
 github_url_normalization:
   canonical_form: "https://github.com/<owner>/<repo>"
