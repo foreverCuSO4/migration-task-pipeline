@@ -92,8 +92,9 @@ python scripts/screen_repo_candidates_b.py \
 
 CLI flags such as `--per-page`, `--max-code-queries-per-repo`,
 `--rate-limit-max-retries`, `--rate-limit-retry-sleep`, `--rate-limit-max-sleep`,
-`--tree`, `--no-tree`, `--resume`, and `--no-resume` override values from the
-config file.
+`--transient-error-max-retries`, `--transient-error-retry-sleep`,
+`--transient-error-max-sleep`, `--tree`, `--no-tree`, `--resume`, and
+`--no-resume` override values from the config file.
 
 For a smoke test, limit the number of rows:
 
@@ -129,9 +130,18 @@ ETA, decision counts, current repository, and current scan phase. Use
 Both Layer A and Layer B rotate GitHub tokens round-robin for API requests. If a
 request gets HTTP 403 or 429 from one token, the same request is retried with
 the next token and fails only after every configured token has failed.
+Token-specific access failures such as HTTP 401 `Bad credentials` and HTTP 403
+`Resource not accessible by personal access token` are also tried against the
+next configured token before the run fails.
 
 Layer B treats GitHub rate limits as incomplete remote evidence, not as a
 negative repo signal. When all configured tokens are rate limited, the stage
 waits and retries the same API call before scoring the repository. Use
 `--rate-limit-max-retries` to bound this behavior for smoke tests or debugging;
 when omitted, Layer B waits until GitHub allows the request to complete.
+
+Layer B also retries transient network errors from `requests`, including
+`Timeout`, `ConnectionError`, `SSLError`, and `ChunkedEncodingError`. If these
+retries are exhausted, the current repository is treated as incomplete remote
+evidence and no candidate row is written, so the default resume behavior can
+retry it on the next run.
