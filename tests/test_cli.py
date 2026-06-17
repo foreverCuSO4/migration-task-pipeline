@@ -2,6 +2,7 @@ import argparse
 import re
 from pathlib import Path
 
+from scripts.check_github_tokens import collect_tokens, token_fingerprint
 from scripts.collect_repo_seeds import resolve_output_root, slugify_run_name
 from scripts.screen_repo_candidates_b import resolve_output_root as resolve_b_output_root
 
@@ -41,3 +42,23 @@ def test_b_output_root_infers_data_root_from_seed_csv():
         == Path("runs/example/data")
     )
     assert resolve_b_output_root("seeds.csv", "out") == Path("out")
+
+
+def test_check_github_tokens_collects_auth_file_by_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "env-token")
+    auth_file = tmp_path / "auth.json"
+    auth_file.write_text('{"github_tokens": [{"name": "file", "token": "file-token"}]}', encoding="utf-8")
+
+    assert [token.token for token in collect_tokens(auth_file)] == ["file-token"]
+    assert [token.token for token in collect_tokens(auth_file, include_env=True)] == [
+        "env-token",
+        "file-token",
+    ]
+
+
+def test_check_github_tokens_fingerprint_does_not_expose_token_value():
+    fingerprint = token_fingerprint("ghp_super-secret-token")
+
+    assert "ghp_" not in fingerprint
+    assert "super-secret-token" not in fingerprint
+    assert fingerprint.startswith("sha256:")

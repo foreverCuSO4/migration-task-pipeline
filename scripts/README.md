@@ -29,6 +29,18 @@ Alternatively, put one or more tokens in ignored `auth.json`:
 If `GITHUB_TOKEN` is set, it is used first and then merged with tokens from
 `auth.json`. Duplicate token values are ignored.
 
+Check whether tokens in `auth.json` are currently usable with:
+
+```bash
+python scripts/check_github_tokens.py --auth-file auth.json
+```
+
+The checker validates `/user` and a small `/search/code` request because Layer B
+depends on GitHub code search. It prints token names and short SHA-256
+fingerprints only; full token values are never printed. By default it checks
+only `auth.json`. Add `--include-env` when you also want to validate
+`GITHUB_TOKEN`.
+
 When `--output-root` is omitted, each run writes under a timestamped directory:
 
 ```text
