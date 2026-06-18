@@ -1,7 +1,11 @@
 import argparse
 
 from migration_task_pipeline.layers.b_remote_code_search.config import load_layer_b_config
-from scripts.screen_repo_candidates_b import build_remote_code_search_config, resolve_dashboard_enabled
+from scripts.screen_repo_candidates_b import (
+    build_remote_code_search_config,
+    resolve_b2c_buffer_enabled,
+    resolve_dashboard_enabled,
+)
 
 
 def test_load_layer_b_config_reads_remote_search_and_runtime(tmp_path):
@@ -30,6 +34,7 @@ remote_code_search:
 runtime:
   resume: false
   dashboard: off
+  b2c_buffer: false
 """,
         encoding="utf-8",
     )
@@ -53,6 +58,7 @@ runtime:
     ]
     assert config.runtime.resume is False
     assert config.runtime.dashboard == "off"
+    assert config.runtime.b2c_buffer is False
 
 
 def test_cli_args_override_layer_b_config(tmp_path):
@@ -88,6 +94,7 @@ runtime:
         transient_error_retry_sleep=None,
         transient_error_max_sleep=45,
         dashboard=True,
+        b2c_buffer=False,
     )
 
     remote_config = build_remote_code_search_config(layer_config.remote_code_search, args)
@@ -102,3 +109,4 @@ runtime:
     assert remote_config.transient_error_retry_sleep_seconds == 2.5
     assert remote_config.transient_error_max_sleep_seconds == 45
     assert resolve_dashboard_enabled(layer_config, args, stderr_isatty=False) is True
+    assert resolve_b2c_buffer_enabled(layer_config, args) is False

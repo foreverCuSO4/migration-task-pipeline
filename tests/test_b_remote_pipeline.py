@@ -3,6 +3,7 @@ import json
 
 import requests
 
+from migration_task_pipeline.buffers import SQLiteBuffer
 from migration_task_pipeline.layers.b_remote_code_search.config import RemoteCodeSearchConfig
 from migration_task_pipeline.layers.b_remote_code_search.github_client import GitHubAccessError, GitHubRateLimitError
 from migration_task_pipeline.layers.b_remote_code_search.pipeline import RemoteScanIncomplete, run_remote_code_screening
@@ -98,6 +99,46 @@ class RecordingGitHubRemoteClient(FakeGitHubRemoteClient):
         return super().search_code(query, per_page=per_page, page=page)
 
 
+class DecisionGitHubRemoteClient:
+    def get_tree(self, repo_key, ref):
+        if repo_key == "owner/promote":
+            return {
+                "tree": [
+                    {"type": "blob", "path": "pyproject.toml"},
+                    {"type": "blob", "path": "src/train.py"},
+                    {"type": "blob", "path": "tests/test_devices.py"},
+                    {"type": "blob", "path": "examples/infer.py"},
+                ]
+            }
+        if repo_key == "owner/maybe":
+            return {"tree": [{"type": "blob", "path": "src/model.py"}]}
+        return {"tree": [{"type": "blob", "path": "README.md"}]}
+
+    def search_code(self, query, *, per_page=5, page=1):
+        if "repo:owner/promote" in query:
+            if any(term in query for term in ["torch.cuda", ".cuda(", 'device=\\"cuda\\"', "CUDAExtension"]):
+                return {
+                    "items": [
+                        {"path": f"src/cuda_{index}.py", "html_url": f"https://example/src/cuda_{index}.py"}
+                        for index in range(4)
+                    ]
+                }
+            if "console_scripts" in query or "argparse.ArgumentParser" in query:
+                return {"items": [{"path": "pyproject.toml", "html_url": "https://example/pyproject.toml"}]}
+            if "--device cpu" in query or "reference" in query:
+                return {
+                    "items": [{"path": "tests/test_devices.py", "html_url": "https://example/tests/test_devices.py"}]
+                }
+        if "repo:owner/maybe" in query and "torch.cuda" in query:
+            return {
+                "items": [
+                    {"path": f"src/cuda_{index}.py", "html_url": f"https://example/src/cuda_{index}.py"}
+                    for index in range(4)
+                ]
+            }
+        return {"items": []}
+
+
 def test_remote_code_screening_writes_outputs(tmp_path):
     seed_csv = tmp_path / "repo-seeds-v0.csv"
     with seed_csv.open("w", encoding="utf-8", newline="") as handle:
@@ -148,6 +189,31 @@ def test_remote_code_screening_writes_outputs(tmp_path):
     assert '"event": "repo_done"' in log_text
 
 
+def test_remote_code_screening_writes_promote_and_maybe_to_b2c_buffer(tmp_path):
+    seed_csv = write_seed_csv_for_repos(tmp_path, ["owner/promote", "owner/maybe", "owner/reject"])
+
+    outputs = run_remote_code_screening(
+        seed_csv,
+        output_root=tmp_path,
+        run_date="20260617",
+        github_client=DecisionGitHubRemoteClient(),
+        config=RemoteCodeSearchConfig(per_page=5, max_code_queries_per_repo=24),
+    )
+
+    assert outputs.b2c_buffer is not None
+    assert outputs.b2c_buffer_inserted_count == 2
+    buffer = SQLiteBuffer(outputs.b2c_buffer)
+    assert buffer.counts_by_status() == {"pending": 2}
+    first = buffer.claim_next("test")
+    second = buffer.claim_next("test")
+    assert first is not None
+    assert second is not None
+    assert first["repo_key"] == "owner/promote"
+    assert first["payload_json"]["b_decision"] == "promote"
+    assert second["repo_key"] == "owner/maybe"
+    assert second["payload_json"]["b_decision"] == "maybe"
+
+
 def test_remote_code_screening_resumes_from_existing_candidate_csv_by_default(tmp_path):
     seed_csv = write_seed_csv_for_repos(tmp_path, ["owner/repo", "other/repo"])
     candidates_path = tmp_path / "processed" / "repo-candidates-b.csv"
@@ -173,6 +239,91 @@ def test_remote_code_screening_resumes_from_existing_candidate_csv_by_default(tm
     assert client.tree_repos == ["other/repo"]
     assert all("repo:owner/repo" not in query for query in client.search_queries)
     assert '"event": "repo_skipped_resume"' in outputs.log_file.read_text(encoding="utf-8")
+
+
+def test_remote_code_screening_resume_backfills_b2c_buffer_from_existing_csv(tmp_path):
+    seed_csv = write_seed_csv_for_repos(tmp_path, ["owner/repo"])
+    candidates_path = tmp_path / "processed" / "repo-candidates-b.csv"
+    candidates_path.parent.mkdir(parents=True)
+    with candidates_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=B_CANDIDATE_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerow(
+            {
+                "repo_key": "owner/repo",
+                "repo_url": "https://github.com/owner/repo",
+                "repo_owner": "owner",
+                "repo_name": "repo",
+                "b_score": "0.7000",
+                "b_decision": "promote",
+                "b_reasons": "strong_remote_evidence",
+            }
+        )
+
+    outputs = run_remote_code_screening(
+        seed_csv,
+        output_root=tmp_path,
+        run_date="20260617",
+        github_client=RecordingGitHubRemoteClient(),
+        config=RemoteCodeSearchConfig(per_page=2, max_code_queries_per_repo=1),
+        limit=0,
+    )
+
+    assert outputs.b2c_buffer_backfilled_count == 1
+    buffer = SQLiteBuffer(outputs.b2c_buffer)
+    claimed = buffer.claim_next("test")
+    assert claimed is not None
+    assert claimed["repo_key"] == "owner/repo"
+    assert claimed["evidence_json"]["resume_source"] == "csv_only"
+    assert claimed["evidence_json"]["candidate_csv_row"]["b_decision"] == "promote"
+
+
+def test_remote_code_screening_resume_backfills_b2c_buffer_from_existing_jsonl(tmp_path):
+    seed_csv = write_seed_csv_for_repos(tmp_path, ["owner/repo"])
+    signals_path = tmp_path / "interim" / "github-code-signals-20260617.jsonl"
+    signals_path.parent.mkdir(parents=True)
+    signals_path.write_text(
+        json.dumps(
+            {
+                "repo_key": "owner/repo",
+                "repo_url": "https://github.com/owner/repo",
+                "github_default_branch": "main",
+                "tree_paths": ["src/model.py"],
+                "code_hits": [{"group": "cuda", "term": "torch.cuda", "path": "src/model.py"}],
+                "errors": [],
+                "scores": {
+                    "repo_key": "owner/repo",
+                    "repo_url": "https://github.com/owner/repo",
+                    "repo_owner": "owner",
+                    "repo_name": "repo",
+                    "b_score": 0.52,
+                    "b_decision": "maybe",
+                    "b_reasons": ["partial_remote_evidence"],
+                },
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    outputs = run_remote_code_screening(
+        seed_csv,
+        output_root=tmp_path,
+        run_date="20260617",
+        github_client=RecordingGitHubRemoteClient(),
+        config=RemoteCodeSearchConfig(per_page=2, max_code_queries_per_repo=1),
+        limit=0,
+    )
+
+    assert outputs.b2c_buffer_backfilled_count == 1
+    buffer = SQLiteBuffer(outputs.b2c_buffer)
+    claimed = buffer.claim_next("test")
+    assert claimed is not None
+    assert claimed["repo_key"] == "owner/repo"
+    assert claimed["payload_json"]["b_decision"] == "maybe"
+    assert claimed["evidence_json"]["resume_source"] == "jsonl_only"
 
 
 def test_remote_code_screening_emits_progress_events(tmp_path):

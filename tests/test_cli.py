@@ -2,6 +2,7 @@ import argparse
 import re
 from pathlib import Path
 
+from migration_task_pipeline.layers.b_remote_code_search.pipeline import default_b2c_buffer_path
 from scripts.check_github_tokens import collect_tokens, token_fingerprint
 from scripts.collect_repo_seeds import resolve_output_root, slugify_run_name
 from scripts.screen_repo_candidates_b import resolve_output_root as resolve_b_output_root
@@ -42,6 +43,11 @@ def test_b_output_root_infers_data_root_from_seed_csv():
         == Path("runs/example/data")
     )
     assert resolve_b_output_root("seeds.csv", "out") == Path("out")
+
+
+def test_b2c_buffer_path_uses_run_root_when_output_root_is_run_data():
+    assert default_b2c_buffer_path("runs/example/data") == Path("runs/example/buffers/b_to_c.sqlite")
+    assert default_b2c_buffer_path("data") == Path("data/buffers/b_to_c.sqlite")
 
 
 def test_check_github_tokens_collects_auth_file_by_default(tmp_path, monkeypatch):
