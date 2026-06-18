@@ -1,0 +1,20 @@
+# Example configuration for Stage C1 local repository materialization.
+
+materialization:
+  # 1 means shallow clone. Use 0 for a full clone.
+  clone_depth: 1
+  clone_timeout_seconds: 1800
+  lease_seconds: 3600
+  retry_priority: 0
+  submodules: false
+  lfs: false
+  proxy:
+    # Leave empty to inherit system environment variables and git config.
+    http: ""
+    https: ""
+    all: ""
+    no_proxy: ""
+
+runtime:
+  concurrency: 4
+  max_items: null

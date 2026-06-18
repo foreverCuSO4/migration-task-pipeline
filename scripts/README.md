@@ -153,3 +153,61 @@ Layer B also retries transient network errors from `requests`, including
 retries are exhausted, the current repository is treated as incomplete remote
 evidence and no candidate row is written, so the default resume behavior can
 retry it on the next run.
+
+## Stage C1 Local Repository Materialization
+
+Run C1 after Layer B has produced `runs/<run>/buffers/b_to_c.sqlite`:
+
+```bash
+python scripts/materialize_repos_c1.py \
+  --run-root runs/<run>
+```
+
+By default, C1 reads `configs/layer-c1.example.yaml` and uses these paths:
+
+```text
+input buffer:  runs/<run>/buffers/b_to_c.sqlite
+output buffer: runs/<run>/buffers/c1_to_c2.sqlite
+repo root:     runs/<run>/repos/
+registry:      runs/<run>/state/local-repos.sqlite
+log file:      runs/<run>/data/logs/c1-materialization-YYYYMMDD.log
+```
+
+C1 shallow-clones repositories by default and runs workers concurrently. Set
+the worker count in config:
+
+```yaml
+runtime:
+  concurrency: 4
+```
+
+or override it on the command line:
+
+```bash
+python scripts/materialize_repos_c1.py \
+  --run-root runs/<run> \
+  --concurrency 8
+```
+
+If `auth.json` contains GitHub tokens, C1 rotates them for HTTPS GitHub clones.
+Tokens are provided through `GIT_ASKPASS`; they are not embedded in clone URLs
+or logged. Repositories are cloned anonymously when no token is available.
+
+Proxy values can be set in `configs/layer-c1.example.yaml`:
+
+```yaml
+materialization:
+  proxy:
+    http: ""
+    https: ""
+    all: ""
+    no_proxy: ""
+```
+
+Empty values inherit the current process environment and git configuration.
+Non-empty values override `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and
+`NO_PROXY` for C1 clone subprocesses.
+
+Clone failures are operational failures, not candidate rejects. C1 records the
+failure in `local-repos.sqlite`, requeues the B item as `pending` with retry
+priority, and does not write a `C1_to_C2` item until a later clone succeeds.

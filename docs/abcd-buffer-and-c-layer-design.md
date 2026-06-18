@@ -11,10 +11,11 @@ what already happened.
 
 ## Pipeline Buffers
 
-The ABCD pipeline should use persistent buffers between stages:
+The ABCD pipeline should use persistent buffers between stages. Stage C is split
+into C1 and C2:
 
 ```text
-A -> buffer_a_to_b -> B -> buffer_b_to_c -> C -> buffer_c_to_d -> D -> final csv
+A -> buffer_a_to_b -> B -> buffer_b_to_c1 -> C1 -> buffer_c1_to_c2 -> C2 -> buffer_c2_to_d -> D -> final csv
 ```
 
 Each stage is responsible for its own filtering decision:
@@ -38,7 +39,8 @@ Buffers should be implemented as SQLite files, not JSON arrays:
 ```text
 runs/<run_id>/buffers/a_to_b.sqlite
 runs/<run_id>/buffers/b_to_c.sqlite
-runs/<run_id>/buffers/c_to_d.sqlite
+runs/<run_id>/buffers/c1_to_c2.sqlite
+runs/<run_id>/buffers/c2_to_d.sqlite
 ```
 
 SQLite is preferred because it supports:
@@ -170,10 +172,27 @@ If downstream buffers are empty and the final goal has not been reached, Stage A
 can continue producing more seeds. If downstream buffers are backed up, upstream
 production can pause.
 
-## Stage C Repository Management
+## Stage C Split
 
-Stage C starts the local clone phase. From this point on, local directories must
-be treated as a cache or working tree, not as the source of truth.
+Stage C is split into two pipeline units:
+
+```text
+C1: Local Repository Materialization
+C2: Local Heuristic Screening
+```
+
+C1 is responsible for making a repository available locally and recording its
+identity, path, checkout SHA, and clone state. C2 is responsible for local
+heuristic screening, such as keyword search, installability checks, interface
+checks, test/example discovery, and CUDA/GPU assumption checks.
+
+This split keeps clone failures separate from semantic screening decisions and
+allows C2 rules to be rerun without cloning repositories again.
+
+## Stage C1 Repository Management
+
+Stage C1 starts the local clone phase. From this point on, local directories
+must be treated as a cache or working tree, not as the source of truth.
 
 The source of truth should be a SQL registry.
 
@@ -271,9 +290,9 @@ Example:
 This manifest is for human debugging only. The SQL registry remains the source
 of truth.
 
-## Clone State vs C Screening Result
+## Clone State vs C2 Screening Result
 
-Clone/cache state and Stage C screening decisions should be separate.
+Clone/cache state and Stage C2 screening decisions should be separate.
 
 Recommended tables:
 
@@ -285,7 +304,7 @@ c_screening_results
 `local_repos` records whether the repository exists locally, where it is, and
 which commit was checked out.
 
-`c_screening_results` records Stage C's decision and evidence:
+`c_screening_results` records Stage C2's decision and evidence:
 
 ```text
 repo_id
@@ -297,8 +316,8 @@ reason
 created_at
 ```
 
-A repository can be cloned successfully and still be rejected by C. Conversely,
-a clone failure should be tracked as clone state, not as a semantic C reject.
+A repository can be cloned successfully and still be rejected by C2. Conversely,
+a clone failure should be tracked as clone state, not as a semantic C2 reject.
 
 ## Stage C Cleanup Policy
 
@@ -307,9 +326,9 @@ Stage C should be able to manage disk pressure explicitly.
 Recommended default policy:
 
 ```text
-accept repo -> keep local clone for D
-reject repo -> delete working tree after evidence is written
-failed repo -> keep recent failures for debugging, then prune
+C2 accept repo -> keep local clone for D
+C2 reject repo -> delete working tree after evidence is written
+C1 failed repo -> keep recent failures for debugging, then prune
 ```
 
 Useful runtime options:
@@ -328,7 +347,7 @@ C-layer evidence, and rejection reason should remain.
 
 Stage D should not discover work by scanning `runs/<run>/repos/`.
 
-It should consume `C_to_D` buffer items. Each item should include:
+It should consume `C2_to_D` buffer items. Each item should include:
 
 ```text
 repo_id
@@ -338,7 +357,7 @@ c_evidence_summary
 ```
 
 This keeps D deterministic and auditable. If a local directory exists but no
-`C_to_D` item references it, D should ignore it.
+`C2_to_D` item references it, D should ignore it.
 
 ## Implementation Principles
 

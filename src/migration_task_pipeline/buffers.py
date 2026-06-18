@@ -88,6 +88,11 @@ class SQLiteBuffer:
             row = connection.execute("SELECT 1 FROM buffer_items WHERE item_id = ?", (item_id,)).fetchone()
         return row is not None
 
+    def get_item(self, item_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM buffer_items WHERE item_id = ?", (item_id,)).fetchone()
+        return row_to_dict(row)
+
     def counts_by_status(self) -> dict[str, int]:
         with self._connect() as connection:
             rows = connection.execute("SELECT status, COUNT(*) AS count FROM buffer_items GROUP BY status").fetchall()
@@ -139,6 +144,25 @@ class SQLiteBuffer:
 
     def mark_rejected(self, item_id: str, reason: str) -> None:
         self._mark_status(item_id, status="rejected", last_error=reason)
+
+    def requeue_pending(self, item_id: str, *, error: str, priority: int = 0) -> None:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE buffer_items
+                SET status = 'pending',
+                    priority = ?,
+                    worker_id = '',
+                    leased_at = '',
+                    lease_expires_at = '',
+                    created_at = ?,
+                    updated_at = ?,
+                    last_error = ?
+                WHERE item_id = ?
+                """,
+                (int(priority), now, now, error, item_id),
+            )
 
     def _mark_status(self, item_id: str, *, status: str, last_error: str) -> None:
         validate_status(status)

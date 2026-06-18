@@ -67,3 +67,19 @@ def test_sqlite_buffer_marks_terminal_statuses(tmp_path):
     buffer.mark_rejected("rejected", "not suitable")
 
     assert buffer.counts_by_status() == {"done": 1, "failed": 1, "rejected": 1}
+
+
+def test_sqlite_buffer_requeues_pending_at_lower_priority(tmp_path):
+    buffer = SQLiteBuffer(tmp_path / "b_to_c.sqlite")
+    buffer.insert_item(make_item("retry", priority=100))
+
+    claimed = buffer.claim_next("worker-a")
+    assert claimed is not None
+    buffer.requeue_pending("retry", error="clone failed", priority=0)
+
+    item = buffer.get_item("retry")
+    assert item is not None
+    assert item["status"] == "pending"
+    assert item["priority"] == 0
+    assert item["worker_id"] == ""
+    assert item["last_error"] == "clone failed"
