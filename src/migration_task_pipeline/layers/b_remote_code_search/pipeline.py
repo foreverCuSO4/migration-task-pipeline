@@ -6,11 +6,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 import csv
+import hashlib
 import json
 import time
 from typing import Callable
 
 import requests
+
+from migration_task_pipeline.buffers import BufferItem, SQLiteBuffer
+from migration_task_pipeline.layers.a_seed_collection.github_urls import normalize_github_url
 
 from .config import RemoteCodeSearchConfig
 from .github_client import GitHubAccessError, GitHubRateLimitError, GitHubRemoteClient
@@ -44,6 +48,9 @@ class RemoteScreeningOutputs:
     promoted_count: int
     maybe_count: int
     rejected_count: int
+    b2c_buffer: Path | None = None
+    b2c_buffer_inserted_count: int = 0
+    b2c_buffer_backfilled_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -69,6 +76,8 @@ def run_remote_code_screening(
     limit: int | None = None,
     progress_callback: ProgressCallback | None = None,
     resume: bool = True,
+    b2c_buffer_enabled: bool = True,
+    b2c_buffer_path: str | Path | None = None,
 ) -> RemoteScreeningOutputs:
     config = config or RemoteCodeSearchConfig()
     client = github_client or GitHubRemoteClient.from_env(auth_path=auth_path)
@@ -78,9 +87,22 @@ def run_remote_code_screening(
     signals_path = output_root / "interim" / f"github-code-signals-{run_date}.jsonl"
     candidates_path = output_root / "processed" / "repo-candidates-b.csv"
     log_path = output_root / "logs" / f"remote-code-screening-{run_date}.log"
+    buffer_path = Path(b2c_buffer_path) if b2c_buffer_path is not None else default_b2c_buffer_path(output_root)
     ensure_parent(signals_path)
     ensure_parent(candidates_path)
     ensure_parent(log_path)
+
+    b2c_buffer = SQLiteBuffer(buffer_path) if b2c_buffer_enabled else None
+    source_run_id = infer_source_run_id(output_root)
+    b2c_buffer_backfilled_count = 0
+    if b2c_buffer is not None and resume:
+        b2c_buffer_backfilled_count = backfill_b2c_buffer(
+            b2c_buffer,
+            candidates_path=candidates_path,
+            signal_paths=signal_paths_for_backfill(output_root, signals_path),
+            source_run_id=source_run_id,
+        )
+    b2c_buffer_inserted_count = 0
 
     resume_state = load_resume_state(candidates_path) if resume else ResumeState(repo_keys=set())
     completed_repo_keys = set(resume_state.repo_keys)
@@ -148,6 +170,9 @@ def run_remote_code_screening(
                 "transient_error_retry_sleep_seconds": config.transient_error_retry_sleep_seconds,
                 "transient_error_max_sleep_seconds": config.transient_error_max_sleep_seconds,
                 "total_count": total_count,
+                "b2c_buffer_enabled": b2c_buffer is not None,
+                "b2c_buffer": str(buffer_path) if b2c_buffer is not None else None,
+                "b2c_buffer_backfilled_count": b2c_buffer_backfilled_count,
             },
         )
         emit_progress(
@@ -159,7 +184,18 @@ def run_remote_code_screening(
             log_file=str(log_path),
             resume_enabled=resume,
             resumed_count=resumed_count,
+            b2c_buffer=str(buffer_path) if b2c_buffer is not None else None,
+            b2c_buffer_backfilled_count=b2c_buffer_backfilled_count,
         )
+        if b2c_buffer is not None:
+            write_log(
+                log_handle,
+                "b2c_buffer_backfill_done",
+                {
+                    "path": str(buffer_path),
+                    "inserted_count": b2c_buffer_backfilled_count,
+                },
+            )
 
         for index, seed_row in enumerate(iter_csv(seed_csv), start=1):
             if limit is not None and index > limit:
@@ -205,6 +241,9 @@ def run_remote_code_screening(
             write_jsonl_row(signals_handle, evidence)
             writer.writerow(normalize_row(scored, B_CANDIDATE_COLUMNS))
             csv_handle.flush()
+            if b2c_buffer is not None:
+                if insert_b2c_buffer_item(b2c_buffer, scored, evidence, source_run_id=source_run_id):
+                    b2c_buffer_inserted_count += 1
             if normalized_repo_key:
                 completed_repo_keys.add(normalized_repo_key)
 
@@ -225,6 +264,7 @@ def run_remote_code_screening(
                     "repo_key": repo_key,
                     "decision": decision,
                     "b_score": scored.get("b_score"),
+                    "b2c_buffer_inserted_count": b2c_buffer_inserted_count,
                     "elapsed_sec": round(repo_elapsed, 3),
                     "errors": scored.get("b_errors", []),
                 },
@@ -233,6 +273,7 @@ def run_remote_code_screening(
                 "repo_done",
                 decision=decision,
                 b_score=scored.get("b_score"),
+                b2c_buffer_inserted_count=b2c_buffer_inserted_count,
                 repo_elapsed_sec=repo_elapsed,
                 errors=scored.get("b_errors", []),
             )
@@ -246,6 +287,9 @@ def run_remote_code_screening(
                 "promoted_count": promoted_count,
                 "maybe_count": maybe_count,
                 "rejected_count": rejected_count,
+                "b2c_buffer": str(buffer_path) if b2c_buffer is not None else None,
+                "b2c_buffer_inserted_count": b2c_buffer_inserted_count,
+                "b2c_buffer_backfilled_count": b2c_buffer_backfilled_count,
                 "elapsed_sec": round(time.monotonic() - started, 3),
             },
         )
@@ -260,7 +304,202 @@ def run_remote_code_screening(
         promoted_count=promoted_count,
         maybe_count=maybe_count,
         rejected_count=rejected_count,
+        b2c_buffer=buffer_path if b2c_buffer is not None else None,
+        b2c_buffer_inserted_count=b2c_buffer_inserted_count,
+        b2c_buffer_backfilled_count=b2c_buffer_backfilled_count,
     )
+
+
+B2C_DECISIONS = {"promote", "maybe"}
+
+
+def default_b2c_buffer_path(output_root: str | Path) -> Path:
+    root = Path(output_root)
+    if is_run_data_root(root):
+        return root.parent / "buffers" / "b_to_c.sqlite"
+    return root / "buffers" / "b_to_c.sqlite"
+
+
+def infer_source_run_id(output_root: str | Path) -> str:
+    root = Path(output_root)
+    if is_run_data_root(root):
+        return root.parent.name
+    return root.name
+
+
+def is_run_data_root(path: Path) -> bool:
+    parts = path.parts
+    return len(parts) >= 3 and parts[-1] == "data" and parts[-3] == "runs"
+
+
+def signal_paths_for_backfill(output_root: str | Path, current_signals_path: str | Path) -> list[Path]:
+    current = Path(current_signals_path)
+    interim_dir = Path(output_root) / "interim"
+    paths = sorted(interim_dir.glob("github-code-signals-*.jsonl")) if interim_dir.exists() else []
+    if current not in paths:
+        paths.append(current)
+    return paths
+
+
+def backfill_b2c_buffer(
+    buffer: SQLiteBuffer,
+    *,
+    candidates_path: str | Path,
+    signal_paths: list[Path],
+    source_run_id: str,
+) -> int:
+    evidence_by_repo = load_signal_evidence_by_repo(signal_paths)
+    csv_repo_keys: set[str] = set()
+    inserted_count = 0
+
+    if file_has_content(candidates_path):
+        with Path(candidates_path).open("r", encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                repo_key = normalized_repo_key(row)
+                if repo_key:
+                    csv_repo_keys.add(repo_key)
+                if not is_b2c_candidate(row):
+                    continue
+                evidence = evidence_by_repo.get(repo_key, {})
+                evidence_json = dict(evidence)
+                evidence_json["resume_source"] = "csv_and_jsonl" if evidence else "csv_only"
+                evidence_json["candidate_csv_row"] = row
+                if insert_b2c_buffer_item(buffer, row, evidence_json, source_run_id=source_run_id):
+                    inserted_count += 1
+
+    for repo_key, evidence in evidence_by_repo.items():
+        if repo_key in csv_repo_keys:
+            continue
+        scores = evidence.get("scores")
+        if not isinstance(scores, dict) or not is_b2c_candidate(scores):
+            continue
+        evidence_json = dict(evidence)
+        evidence_json["resume_source"] = "jsonl_only"
+        if insert_b2c_buffer_item(buffer, scores, evidence_json, source_run_id=source_run_id):
+            inserted_count += 1
+
+    return inserted_count
+
+
+def load_signal_evidence_by_repo(signal_paths: list[Path]) -> dict[str, dict[str, object]]:
+    evidence_by_repo: dict[str, dict[str, object]] = {}
+    for path in signal_paths:
+        if not file_has_content(path):
+            continue
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    evidence = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(evidence, dict):
+                    continue
+                repo_key = str(evidence.get("repo_key") or "").strip().lower()
+                if repo_key:
+                    evidence_by_repo[repo_key] = evidence
+    return evidence_by_repo
+
+
+def insert_b2c_buffer_item(
+    buffer: SQLiteBuffer,
+    scored: dict[str, object],
+    evidence: dict[str, object],
+    *,
+    source_run_id: str,
+) -> bool:
+    if not is_b2c_candidate(scored):
+        return False
+    item = build_b2c_buffer_item(scored, evidence, source_run_id=source_run_id)
+    if item is None:
+        return False
+    return buffer.insert_item(item)
+
+
+def build_b2c_buffer_item(
+    scored: dict[str, object],
+    evidence: dict[str, object],
+    *,
+    source_run_id: str,
+) -> BufferItem | None:
+    repo_key = normalized_repo_key(scored) or normalized_repo_key(evidence)
+    if not repo_key:
+        return None
+
+    repo_url = normalized_repo_url(scored, repo_key)
+    item_id = github_url_item_id(repo_url)
+    repo_owner = str(scored.get("repo_owner") or "").strip()
+    repo_name = str(scored.get("repo_name") or "").strip()
+    repo_full_name = f"{repo_owner}/{repo_name}" if repo_owner and repo_name else repo_key
+    payload = {
+        "repo_key": repo_key,
+        "repo_full_name": repo_full_name,
+        "repo_url": repo_url,
+        "repo_owner": repo_owner,
+        "repo_name": repo_name,
+        "github_default_branch": evidence.get("github_default_branch", ""),
+        "github_license": scored.get("github_license", ""),
+        "github_size_kb": scored.get("github_size_kb", ""),
+        "github_primary_language": scored.get("github_primary_language", ""),
+        "b_decision": scored.get("b_decision", ""),
+        "b_reasons": scored.get("b_reasons", []),
+    }
+
+    return BufferItem(
+        item_id=item_id,
+        repo_id=item_id,
+        repo_key=repo_key,
+        repo_full_name=repo_full_name,
+        repo_url=repo_url,
+        source_layer="B",
+        source_run_id=source_run_id,
+        payload_version="b_to_c.v1",
+        payload_json=payload,
+        scores_json=dict(scored),
+        evidence_json=dict(evidence),
+        priority=b2c_priority(scored),
+        status="pending",
+    )
+
+
+def normalized_repo_key(row: dict[str, object]) -> str:
+    return str(row.get("repo_key") or "").strip().lower()
+
+
+def normalized_repo_url(row: dict[str, object], repo_key: str) -> str:
+    repo_url = str(row.get("repo_url") or "").strip()
+    normalized = normalize_github_url(repo_url) if repo_url else None
+    if normalized is None and repo_key:
+        normalized = normalize_github_url(f"https://github.com/{repo_key}")
+    if normalized is not None:
+        return normalized.repo_url
+    return repo_url or f"https://github.com/{repo_key}"
+
+
+def github_url_item_id(repo_url: str) -> str:
+    digest = hashlib.sha256(repo_url.strip().lower().encode("utf-8")).hexdigest()
+    return f"github-url:{digest}"
+
+
+def is_b2c_candidate(row: dict[str, object]) -> bool:
+    return str(row.get("b_decision") or "").strip().lower() in B2C_DECISIONS
+
+
+def b2c_priority(row: dict[str, object]) -> int:
+    score = as_float(row.get("b_score"))
+    decision = str(row.get("b_decision") or "").strip().lower()
+    base = 200_000 if decision == "promote" else 100_000
+    return base + round(score * 10_000)
+
+
+def as_float(value: object) -> float:
+    try:
+        if value in (None, ""):
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def load_resume_state(candidates_path: str | Path) -> ResumeState:

@@ -70,6 +70,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--b2c-buffer",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Write promote/maybe results to the B-to-C SQLite buffer. "
+            "Uses runtime.b2c_buffer from config unless explicitly set."
+        ),
+    )
+    parser.add_argument(
         "--per-page",
         type=int,
         default=None,
@@ -214,12 +223,19 @@ def resolve_dashboard_enabled(config: LayerBConfig, args: argparse.Namespace, *,
     return stderr_isatty
 
 
+def resolve_b2c_buffer_enabled(config: LayerBConfig, args: argparse.Namespace) -> bool:
+    if args.b2c_buffer is not None:
+        return bool(args.b2c_buffer)
+    return config.runtime.b2c_buffer
+
+
 def main() -> int:
     args = parse_args()
     output_root = resolve_output_root(args.seed_csv, args.output_root)
     layer_config = load_layer_b_config(args.config)
     config = build_remote_code_search_config(layer_config.remote_code_search, args)
     resume = args.resume if args.resume is not None else layer_config.runtime.resume
+    b2c_buffer_enabled = resolve_b2c_buffer_enabled(layer_config, args)
     dashboard = None
     if resolve_dashboard_enabled(layer_config, args, stderr_isatty=sys.stderr.isatty()):
         dashboard = TerminalDashboard()
@@ -234,6 +250,7 @@ def main() -> int:
             limit=args.limit,
             progress_callback=dashboard,
             resume=resume,
+            b2c_buffer_enabled=b2c_buffer_enabled,
         )
     except Exception as exc:
         if dashboard is not None:
@@ -251,6 +268,10 @@ def main() -> int:
     print(f"reject: {outputs.rejected_count}")
     print(f"signals jsonl: {outputs.signals_jsonl}")
     print(f"candidates csv: {outputs.candidates_csv}")
+    if outputs.b2c_buffer is not None:
+        print(f"b2c buffer: {outputs.b2c_buffer}")
+        print(f"b2c buffer inserted: {outputs.b2c_buffer_inserted_count}")
+        print(f"b2c buffer backfilled: {outputs.b2c_buffer_backfilled_count}")
     print(f"log file: {outputs.log_file}")
     return 0
 

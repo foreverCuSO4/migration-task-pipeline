@@ -92,3 +92,6 @@ runtime:
 
   # auto: show only on interactive terminals; on/off force behavior.
   dashboard: auto
+
+  # Write promote/maybe results into runs/<run>/buffers/b_to_c.sqlite.
+  b2c_buffer: true

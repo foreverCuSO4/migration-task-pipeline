@@ -109,6 +109,10 @@ When `--output-root` is omitted, the script writes into the same `data/` root as
 the seed CSV. It writes remote evidence to
 `data/interim/github-code-signals-YYYYMMDD.jsonl` and ranked candidates to
 `data/processed/repo-candidates-b.csv`.
+By default, Layer B also writes promoted and maybe candidates to the B-to-C
+SQLite buffer at `runs/<run>/buffers/b_to_c.sqlite` when the output root is a
+run `data/` directory, or `<output-root>/buffers/b_to_c.sqlite` otherwise. Use
+`--no-b2c-buffer` to disable this queue output.
 
 Layer B is a streaming stage. After each repository finishes, it appends one
 JSONL evidence row, appends one CSV candidate row, and writes detailed progress
@@ -121,6 +125,10 @@ already processed, skips those repositories, and appends new evidence, candidate
 rows, and log events. This uses the candidate CSV as the completion source of
 truth so a crash between evidence and CSV writes cannot hide a missing final
 candidate row. Use `--no-resume` to overwrite B outputs and scan from scratch.
+When the B-to-C buffer is enabled, resume also backfills any promoted or maybe
+candidate that exists in prior B CSV/JSONL outputs but is missing from the
+buffer, so older Layer B runs can be made visible to Stage C without rescanning
+those repositories.
 
 When run in an interactive terminal, Layer B also displays a live dashboard on
 stderr with completion progress, elapsed time, average repositories per minute,

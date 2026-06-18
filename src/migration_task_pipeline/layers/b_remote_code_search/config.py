@@ -46,6 +46,7 @@ class RemoteCodeSearchConfig:
 class LayerBRuntimeConfig:
     resume: bool = True
     dashboard: str = "auto"
+    b2c_buffer: bool = True
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ def load_layer_b_config(path: str | Path) -> LayerBConfig:
     runtime = LayerBRuntimeConfig(
         resume=as_bool(runtime_raw.get("resume"), True),
         dashboard=as_dashboard_mode(runtime_raw.get("dashboard"), "auto"),
+        b2c_buffer=as_bool(runtime_raw.get("b2c_buffer"), True),
     )
     return LayerBConfig(remote_code_search=remote, runtime=runtime)
 
