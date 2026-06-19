@@ -6,7 +6,11 @@ import subprocess
 import pytest
 
 from migration_task_pipeline.buffers import BufferItem, SQLiteBuffer
-from migration_task_pipeline.layers.c1_local_materialization.config import load_layer_c1_config
+from migration_task_pipeline.layers.c1_local_materialization.config import (
+    LayerC1Config,
+    MaterializationConfig,
+    load_layer_c1_config,
+)
 from migration_task_pipeline.layers.c1_local_materialization.pipeline import (
     MANIFEST_FILENAME,
     ensure_cloned,
@@ -14,6 +18,7 @@ from migration_task_pipeline.layers.c1_local_materialization.pipeline import (
     local_repo_path,
     load_optional_token_pool,
     repo_key_slug,
+    repository_has_valid_head,
     run_c1_materialization,
 )
 from migration_task_pipeline.layers.c1_local_materialization.registry import LocalRepoRecord, LocalRepoRegistry
@@ -45,6 +50,7 @@ materialization:
   clone_depth: 2
   clone_timeout_seconds: 30
   lease_seconds: 45
+  max_attempts: 5
   retry_priority: -5
   submodules: true
   lfs: true
@@ -56,6 +62,7 @@ materialization:
 runtime:
   concurrency: 3
   max_items: 9
+  dashboard: off
 """,
         encoding="utf-8",
     )
@@ -65,6 +72,7 @@ runtime:
     assert config.materialization.clone_depth == 2
     assert config.materialization.clone_timeout_seconds == 30
     assert config.materialization.lease_seconds == 45
+    assert config.materialization.max_attempts == 5
     assert config.materialization.retry_priority == -5
     assert config.materialization.submodules is True
     assert config.materialization.lfs is True
@@ -74,6 +82,7 @@ runtime:
     assert config.materialization.no_proxy == "localhost,127.0.0.1"
     assert config.runtime.concurrency == 3
     assert config.runtime.max_items == 9
+    assert config.runtime.dashboard == "off"
 
     args = type(
         "Args",
@@ -82,6 +91,7 @@ runtime:
             "clone_depth": 1,
             "clone_timeout": None,
             "lease_seconds": None,
+            "max_attempts": 2,
             "retry_priority": 0,
             "submodules": False,
             "lfs": None,
@@ -94,6 +104,7 @@ runtime:
     overridden = build_layer_config(config, args)
     assert overridden.materialization.clone_depth == 1
     assert overridden.materialization.clone_timeout_seconds == 30
+    assert overridden.materialization.max_attempts == 2
     assert overridden.materialization.retry_priority == 0
     assert overridden.materialization.submodules is False
     assert overridden.materialization.lfs is True
@@ -138,8 +149,10 @@ def test_git_clone_env_applies_proxy_overrides(monkeypatch):
 def test_ensure_cloned_uses_askpass_for_token_without_putting_token_in_command(tmp_path, monkeypatch):
     calls = []
 
-    def fake_run(command, text, capture_output, timeout, env, check):
+    def fake_run(command, text, capture_output, timeout, check, env=None):
         calls.append({"command": command, "env": env})
+        if "rev-parse" in command:
+            return type("Completed", (), {"returncode": 0, "stderr": "", "stdout": "abc123\n"})()
         (tmp_path / "clone" / ".git").mkdir(parents=True)
         return type("Completed", (), {"returncode": 0, "stderr": "", "stdout": ""})()
 
@@ -152,6 +165,21 @@ def test_ensure_cloned_uses_askpass_for_token_without_putting_token_in_command(t
     assert "secret-token" not in " ".join(calls[0]["command"])
     assert calls[0]["env"]["GITHUB_TOKEN_FOR_ASKPASS"] == "secret-token"
     assert calls[0]["env"]["GIT_ASKPASS"]
+
+
+def test_ensure_cloned_replaces_invalid_existing_clone(tmp_path):
+    require_git()
+    source = create_git_repo(tmp_path / "source", "module.py")
+    clone_path = tmp_path / "clone"
+    (clone_path / ".git").mkdir(parents=True)
+    (clone_path / "stale.txt").write_text("stale\n", encoding="utf-8")
+    config = load_layer_c1_config(Path("configs/layer-c1.example.yaml")).materialization
+
+    ensure_cloned(source.as_uri(), clone_path, config)
+
+    assert repository_has_valid_head(clone_path)
+    assert (clone_path / "module.py").exists()
+    assert not (clone_path / "stale.txt").exists()
 
 
 def test_local_repo_registry_upserts_records(tmp_path):
@@ -256,6 +284,25 @@ def test_c1_requeues_failed_clone_with_retry_priority(tmp_path):
     assert item["last_error"]
     registry = LocalRepoRegistry(outputs.registry)
     assert registry.counts_by_status() == {"failed": 1}
+
+
+def test_c1_marks_source_failed_after_max_clone_attempts(tmp_path):
+    require_git()
+    run_root = tmp_path / "runs" / "example"
+    input_buffer = SQLiteBuffer(run_root / "buffers" / "b_to_c.sqlite")
+    input_buffer.insert_item(make_b_item("owner/missing", (tmp_path / "missing").as_uri(), priority=100))
+    config = LayerC1Config(materialization=MaterializationConfig(max_attempts=1))
+
+    outputs = run_c1_materialization(run_root=run_root, config=config)
+
+    assert outputs.claimed_count == 1
+    assert outputs.cloned_count == 0
+    assert outputs.failed_count == 1
+    assert outputs.terminal_failed_count == 1
+    item = input_buffer.get_item("github-url:owner/missing")
+    assert item is not None
+    assert item["status"] == "failed"
+    assert item["last_error"]
 
 
 def require_git():

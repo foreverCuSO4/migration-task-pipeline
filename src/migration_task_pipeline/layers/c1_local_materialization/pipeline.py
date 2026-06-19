@@ -13,7 +13,8 @@ import shutil
 import subprocess
 import threading
 import tempfile
-from typing import Any
+import time
+from typing import Any, Callable
 
 from migration_task_pipeline.buffers import BufferItem, SQLiteBuffer
 from migration_task_pipeline.github_auth import GitHubTokenPool, load_github_tokens
@@ -23,6 +24,8 @@ from .registry import LocalRepoRecord, LocalRepoRegistry
 
 
 MANIFEST_FILENAME = ".repo-manifest.json"
+ProgressCallback = Callable[[dict[str, object]], None]
+ProgressEmitter = Callable[..., None]
 
 
 @dataclass(frozen=True)
@@ -45,6 +48,7 @@ class C1Outputs:
     claimed_count: int
     cloned_count: int
     failed_count: int
+    terminal_failed_count: int
     enqueued_count: int
 
 
@@ -77,6 +81,7 @@ class RunCounters:
         self.claimed_count = 0
         self.cloned_count = 0
         self.failed_count = 0
+        self.terminal_failed_count = 0
         self.enqueued_count = 0
         self._lock = threading.Lock()
 
@@ -99,9 +104,24 @@ class RunCounters:
         with self._lock:
             self.failed_count += 1
 
+    def record_terminal_failed(self) -> None:
+        with self._lock:
+            self.terminal_failed_count += 1
+
     def record_enqueued(self) -> None:
         with self._lock:
             self.enqueued_count += 1
+
+    def snapshot(self) -> dict[str, int | None]:
+        with self._lock:
+            return {
+                "max_items": self.max_items,
+                "claimed_count": self.claimed_count,
+                "cloned_count": self.cloned_count,
+                "failed_count": self.failed_count,
+                "terminal_failed_count": self.terminal_failed_count,
+                "enqueued_count": self.enqueued_count,
+            }
 
 
 def run_c1_materialization(
@@ -116,6 +136,7 @@ def run_c1_materialization(
     max_items: int | None = None,
     concurrency: int | None = None,
     auth_path: str | Path = "auth.json",
+    progress_callback: ProgressCallback | None = None,
 ) -> C1Outputs:
     config = config or LayerC1Config()
     paths = resolve_c1_paths(
@@ -136,6 +157,23 @@ def run_c1_materialization(
     item_limit = max_items if max_items is not None else config.runtime.max_items
     counters = RunCounters(item_limit)
     token_pool = load_optional_token_pool(auth_path)
+    started = time.monotonic()
+    total_count = sum(input_queue.counts_by_status().values())
+
+    def emit_progress(event: str, **payload: object) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(
+            {
+                "event": event,
+                "elapsed_sec": time.monotonic() - started,
+                "total_count": total_count,
+                "input_status_counts": input_queue.counts_by_status(),
+                "output_status_counts": output_queue.counts_by_status(),
+                **counters.snapshot(),
+                **payload,
+            }
+        )
 
     logger.write(
         "c1_start",
@@ -148,9 +186,21 @@ def run_c1_materialization(
             "concurrency": worker_count,
             "max_items": item_limit,
             "clone_depth": config.materialization.clone_depth,
+            "max_attempts": config.materialization.max_attempts,
             "github_token_count": len(token_pool) if token_pool is not None else 0,
             "proxy_configured": proxy_configured(config.materialization),
         },
+    )
+    emit_progress(
+        "start",
+        run_root=str(paths.run_root),
+        input_buffer=str(paths.input_buffer),
+        output_buffer=str(paths.output_buffer),
+        repo_root=str(paths.repo_root),
+        registry=str(paths.registry),
+        concurrency=worker_count,
+        clone_depth=config.materialization.clone_depth,
+        max_attempts=config.materialization.max_attempts,
     )
     try:
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
@@ -167,6 +217,7 @@ def run_c1_materialization(
                     token_pool=token_pool,
                     counters=counters,
                     logger=logger,
+                    progress_callback=emit_progress,
                 )
                 for index in range(worker_count)
             ]
@@ -179,9 +230,11 @@ def run_c1_materialization(
                 "claimed_count": counters.claimed_count,
                 "cloned_count": counters.cloned_count,
                 "failed_count": counters.failed_count,
+                "terminal_failed_count": counters.terminal_failed_count,
                 "enqueued_count": counters.enqueued_count,
             },
         )
+        emit_progress("finish")
         logger.close()
 
     return C1Outputs(
@@ -193,6 +246,7 @@ def run_c1_materialization(
         claimed_count=counters.claimed_count,
         cloned_count=counters.cloned_count,
         failed_count=counters.failed_count,
+        terminal_failed_count=counters.terminal_failed_count,
         enqueued_count=counters.enqueued_count,
     )
 
@@ -209,6 +263,7 @@ def worker_loop(
     token_pool: GitHubTokenPool | None,
     counters: RunCounters,
     logger: JsonlLogger,
+    progress_callback: ProgressEmitter | None = None,
 ) -> None:
     while counters.can_claim():
         item = input_queue.claim_next(worker_id, lease_seconds=materialization.lease_seconds)
@@ -220,8 +275,23 @@ def worker_loop(
                 error="max_items_reached_after_claim",
                 priority=int(item.get("priority") or materialization.retry_priority),
             )
+            if progress_callback is not None:
+                progress_callback(
+                    "max_items_reached",
+                    worker_id=worker_id,
+                    item_id=item["item_id"],
+                    repo_key=item["repo_key"],
+                )
             return
         logger.write("item_claimed", {"worker_id": worker_id, "item_id": item["item_id"], "repo_key": item["repo_key"]})
+        if progress_callback is not None:
+            progress_callback(
+                "item_claimed",
+                worker_id=worker_id,
+                item_id=item["item_id"],
+                repo_key=item["repo_key"],
+                attempts=item.get("attempts"),
+            )
         try:
             result = materialize_item(
                 item,
@@ -232,6 +302,7 @@ def worker_loop(
                 token_pool=token_pool,
                 logger=logger,
                 worker_id=worker_id,
+                progress_callback=progress_callback,
             )
         except Exception as exc:
             error = str(exc)
@@ -244,7 +315,6 @@ def worker_loop(
                     error=error,
                 )
             )
-            input_queue.requeue_pending(str(item["item_id"]), error=error, priority=materialization.retry_priority)
             counters.record_failed()
             logger.write(
                 "clone_failed",
@@ -253,8 +323,56 @@ def worker_loop(
                     "item_id": item["item_id"],
                     "repo_key": item["repo_key"],
                     "error": error,
+                    "attempts": item.get("attempts"),
+                    "max_attempts": materialization.max_attempts,
                 },
             )
+            retryable = should_retry_clone_failure(item, materialization)
+            if retryable:
+                input_queue.requeue_pending(str(item["item_id"]), error=error, priority=materialization.retry_priority)
+                logger.write(
+                    "clone_retry_scheduled",
+                    {
+                        "worker_id": worker_id,
+                        "item_id": item["item_id"],
+                        "repo_key": item["repo_key"],
+                        "attempts": item.get("attempts"),
+                        "max_attempts": materialization.max_attempts,
+                    },
+                )
+                if progress_callback is not None:
+                    progress_callback(
+                        "clone_retry_scheduled",
+                        worker_id=worker_id,
+                        item_id=item["item_id"],
+                        repo_key=item["repo_key"],
+                        attempts=item.get("attempts"),
+                        max_attempts=materialization.max_attempts,
+                        error=error,
+                    )
+            else:
+                input_queue.mark_failed(str(item["item_id"]), error)
+                counters.record_terminal_failed()
+                logger.write(
+                    "clone_permanently_failed",
+                    {
+                        "worker_id": worker_id,
+                        "item_id": item["item_id"],
+                        "repo_key": item["repo_key"],
+                        "attempts": item.get("attempts"),
+                        "max_attempts": materialization.max_attempts,
+                    },
+                )
+                if progress_callback is not None:
+                    progress_callback(
+                        "clone_permanently_failed",
+                        worker_id=worker_id,
+                        item_id=item["item_id"],
+                        repo_key=item["repo_key"],
+                        attempts=item.get("attempts"),
+                        max_attempts=materialization.max_attempts,
+                        error=error,
+                    )
             continue
 
         if output_queue.insert_item(result.output_item):
@@ -263,6 +381,13 @@ def worker_loop(
                 "c1_to_c2_inserted",
                 {"worker_id": worker_id, "item_id": result.output_item.item_id, "repo_key": item["repo_key"]},
             )
+            if progress_callback is not None:
+                progress_callback(
+                    "c1_to_c2_inserted",
+                    worker_id=worker_id,
+                    item_id=result.output_item.item_id,
+                    repo_key=item["repo_key"],
+                )
         input_queue.mark_done(str(item["item_id"]))
         counters.record_cloned()
         logger.write(
@@ -275,6 +400,15 @@ def worker_loop(
                 "checkout_sha": result.checkout_sha,
             },
         )
+        if progress_callback is not None:
+            progress_callback(
+                "item_done",
+                worker_id=worker_id,
+                item_id=item["item_id"],
+                repo_key=item["repo_key"],
+                local_path=str(result.local_path),
+                checkout_sha=result.checkout_sha,
+            )
 
 
 @dataclass(frozen=True)
@@ -294,6 +428,7 @@ def materialize_item(
     token_pool: GitHubTokenPool | None,
     logger: JsonlLogger,
     worker_id: str,
+    progress_callback: ProgressEmitter | None = None,
 ) -> MaterializationResult:
     repo_id = str(item["repo_id"])
     repo_key = str(item["repo_key"])
@@ -315,8 +450,18 @@ def materialize_item(
             "proxy_configured": proxy_configured(materialization),
         },
     )
+    if progress_callback is not None:
+        progress_callback(
+            "clone_start",
+            worker_id=worker_id,
+            item_id=item["item_id"],
+            repo_key=repo_key,
+            local_path=str(local_path),
+            attempts=item.get("attempts"),
+            max_attempts=materialization.max_attempts,
+        )
     ensure_cloned(clone_url, local_path, materialization, token_value=token.token if token is not None else "")
-    checkout_sha = git_output(["git", "-C", str(local_path), "rev-parse", "HEAD"], timeout=60)
+    checkout_sha = git_output(["git", "-C", str(local_path), "rev-parse", "--verify", "HEAD"], timeout=60)
     stats = directory_stats(local_path)
     manifest = manifest_payload(
         item,
@@ -377,7 +522,7 @@ def ensure_cloned(
     *,
     token_value: str = "",
 ) -> None:
-    if (local_path / ".git").exists():
+    if repository_has_valid_head(local_path):
         return
     if local_path.exists():
         shutil.rmtree(local_path)
@@ -405,6 +550,27 @@ def ensure_cloned(
         stdout = completed.stdout.strip()
         detail = stderr or stdout or f"git clone exited {completed.returncode}"
         raise RuntimeError(detail)
+    if not repository_has_valid_head(local_path):
+        raise RuntimeError("git clone completed but repository has no valid HEAD")
+
+
+def repository_has_valid_head(path: str | Path) -> bool:
+    repo_path = Path(path)
+    if not (repo_path / ".git").exists():
+        return False
+    completed = subprocess.run(
+        ["git", "-C", str(repo_path), "rev-parse", "--verify", "HEAD"],
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    return completed.returncode == 0 and bool(completed.stdout.strip())
+
+
+def should_retry_clone_failure(item: dict[str, Any], materialization: MaterializationConfig) -> bool:
+    attempts = as_int(item.get("attempts"))
+    return attempts < materialization.max_attempts
 
 
 def run_git_clone_with_askpass(command: list[str], env: dict[str, str], token_value: str, *, timeout: int):
@@ -624,6 +790,15 @@ def repo_key_slug(repo_key: str) -> str:
 
 def stable_hash(value: str) -> str:
     return hashlib.sha256(value.strip().lower().encode("utf-8")).hexdigest()
+
+
+def as_int(value: object) -> int:
+    try:
+        if value in (None, ""):
+            return 0
+        return int(float(str(value)))
+    except (TypeError, ValueError):
+        return 0
 
 
 def resolve_c1_paths(

@@ -5,6 +5,7 @@ materialization:
   clone_depth: 1
   clone_timeout_seconds: 1800
   lease_seconds: 3600
+  max_attempts: 3
   retry_priority: 0
   submodules: false
   lfs: false
@@ -18,3 +19,4 @@ materialization:
 runtime:
   concurrency: 4
   max_items: null
+  dashboard: auto

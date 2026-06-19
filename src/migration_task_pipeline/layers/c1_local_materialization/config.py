@@ -20,6 +20,7 @@ class MaterializationConfig:
     clone_depth: int = 1
     clone_timeout_seconds: int = 1800
     lease_seconds: int = 3600
+    max_attempts: int = 3
     retry_priority: int = 0
     submodules: bool = False
     lfs: bool = False
@@ -33,6 +34,7 @@ class MaterializationConfig:
 class C1RuntimeConfig:
     concurrency: int = 4
     max_items: int | None = None
+    dashboard: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,7 @@ def load_layer_c1_config(path: str | Path) -> LayerC1Config:
             default_materialization.clone_timeout_seconds,
         ),
         lease_seconds=as_int(materialization_raw.get("lease_seconds"), default_materialization.lease_seconds),
+        max_attempts=max(1, as_int(materialization_raw.get("max_attempts"), default_materialization.max_attempts)),
         retry_priority=as_int(materialization_raw.get("retry_priority"), default_materialization.retry_priority),
         submodules=as_bool(materialization_raw.get("submodules"), default_materialization.submodules),
         lfs=as_bool(materialization_raw.get("lfs"), default_materialization.lfs),
@@ -82,6 +85,7 @@ def load_layer_c1_config(path: str | Path) -> LayerC1Config:
     runtime = C1RuntimeConfig(
         concurrency=max(1, as_int(runtime_raw.get("concurrency"), default_runtime.concurrency)),
         max_items=as_optional_int(runtime_raw.get("max_items"), default_runtime.max_items),
+        dashboard=as_dashboard_mode(runtime_raw.get("dashboard"), default_runtime.dashboard),
     )
     return LayerC1Config(materialization=materialization, runtime=runtime)
 
@@ -118,3 +122,14 @@ def as_str(value: Any, default: str) -> str:
     if value is None:
         return default
     return str(value)
+
+
+def as_dashboard_mode(value: Any, default: str) -> str:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    mode = str(value).strip().lower()
+    if mode in {"auto", "on", "off"}:
+        return mode
+    raise ValueError("runtime.dashboard must be one of: auto, on, off")
