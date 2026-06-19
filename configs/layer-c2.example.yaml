@@ -1,0 +1,46 @@
+# Example configuration for Stage C2 local heuristic screening.
+
+scanner:
+  max_file_size_bytes: 2097152
+  max_files_per_repo: 50000
+  max_repo_bytes: 1073741824
+  max_hits_per_repo: 200
+  max_paths_per_group: 20
+  skip_dirs:
+    - .git
+    - .hg
+    - .svn
+    - __pycache__
+    - .mypy_cache
+    - .pytest_cache
+    - .ruff_cache
+    - .tox
+    - .venv
+    - venv
+    - env
+    - node_modules
+    - build
+    - dist
+    - site-packages
+    - third_party
+    - third-party
+    - vendor
+    - external
+    - datasets
+    - dataset
+    - data
+    - checkpoints
+    - checkpoint
+    - weights
+    - models
+
+scoring:
+  promote_threshold: 0.70
+  maybe_threshold: 0.50
+
+runtime:
+  concurrency: 32
+  max_items: null
+  lease_seconds: 3600
+  dashboard: auto
+

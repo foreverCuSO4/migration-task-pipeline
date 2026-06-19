@@ -211,3 +211,45 @@ Non-empty values override `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and
 Clone failures are operational failures, not candidate rejects. C1 records the
 failure in `local-repos.sqlite`, requeues the B item as `pending` with retry
 priority, and does not write a `C1_to_C2` item until a later clone succeeds.
+
+## Stage C2 Local Heuristic Screening
+
+Run C2 after C1 has produced `runs/<run>/buffers/c1_to_c2.sqlite`:
+
+```bash
+python scripts/screen_local_repos_c2.py \
+  --run-root runs/<run>
+```
+
+By default, C2 reads `configs/layer-c2.example.yaml` and uses these paths:
+
+```text
+input buffer:   runs/<run>/buffers/c1_to_c2.sqlite
+output buffer:  runs/<run>/buffers/c2_to_d.sqlite
+evidence jsonl: runs/<run>/data/interim/local-heuristic-evidence-YYYYMMDD.jsonl
+candidates csv: runs/<run>/data/processed/repo-candidates-c2.csv
+log file:       runs/<run>/data/logs/c2-local-screening-YYYYMMDD.log
+```
+
+C2 is local-only and does not execute repository code. It scans bounded file
+trees and text files for CUDA/GPU assumptions, runnable interfaces,
+installability, tests/examples, CPU/reference hints, risk signals, and actual
+checkout size. Promote and maybe decisions are written to `c2_to_d.sqlite`;
+rejects are recorded in the C2 CSV/JSONL/log and marked rejected in the input
+buffer.
+
+Set local scan concurrency in config:
+
+```yaml
+runtime:
+  concurrency: 16
+```
+
+or override it on the command line:
+
+```bash
+python scripts/screen_local_repos_c2.py \
+  --run-root runs/<run> \
+  --concurrency 16 \
+  --dashboard
+```
