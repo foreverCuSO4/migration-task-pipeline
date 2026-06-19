@@ -60,7 +60,24 @@ MACE 是当前正例模板：
 - NPU trace 验证 module/tensor/device 真实执行。
 - hidden cases 覆盖不同结构、batch、dtype、周期性输入和 training smoke。
 
-Reviewer 不需要寻找与 MACE 完全一样的项目，但应寻找同样强度的 contract、reference、evidence 和 hidden-case potential。
+Reviewer 应把本机相邻 benchmark 中的 MACE task 当作直观参考。注意：如果 reviewer agent 以候选 repo 作为工作目录运行，普通相对路径可能解析失败，因此优先使用绝对路径：
+
+```text
+/mnt/nvme0/zhujiayi/workspace/accel-trans-bench-private/tasks/mace-npu-migration/
+```
+
+重点参考这些文件：
+
+```text
+/mnt/nvme0/zhujiayi/workspace/accel-trans-bench-private/tasks/mace-npu-migration/task-spec.md
+/mnt/nvme0/zhujiayi/workspace/accel-trans-bench-private/tasks/mace-npu-migration/instruction.md
+/mnt/nvme0/zhujiayi/workspace/accel-trans-bench-private/tasks/mace-npu-migration/provenance.lock
+/mnt/nvme0/zhujiayi/workspace/accel-trans-bench-private/tasks/mace-npu-migration/tests/evaluate.py
+```
+
+这些文件展示了一道 G4 task 最终会长成什么样：题面如何固定接口，provenance 如何锁定，verifier 如何离线生成/加载输入与 reference，如何用 runtime trace 判断 NPU 执行，以及 hidden cases 如何组织。Reviewer 不需要寻找与 MACE 完全一样的项目，但应寻找同样强度的 contract、reference、evidence 和 hidden-case potential。
+
+如果 agent 的权限策略禁止读取候选仓库之外的绝对路径，D 层调度器应把 MACE task 的关键摘要直接注入 prompt，或者创建一个只读 review workspace，把候选 repo 和 MACE reference task 都放在 agent 可读范围内。
 
 ## 适合出题的核心条件
 
@@ -385,9 +402,25 @@ manual_probe:
   blockers_to_resolve:
     - ""
 
+reviewer_notes:
+  zh:
+    overall_opinion: ""
+    task_design_comments: ""
+    comparison_to_known_tasks: ""
+    concerns_or_alternatives: ""
+    confidence_rationale: ""
+  en:
+    overall_opinion: ""
+    task_design_comments: ""
+    comparison_to_known_tasks: ""
+    concerns_or_alternatives: ""
+    confidence_rationale: ""
+
 open_questions:
   - ""
 ```
+
+`reviewer_notes.zh` 用中文写，方便人工快速审阅；`reviewer_notes.en` 用英文写，用于归档、共享和后续自动报告。两版应保持同一判断和同一风险重点，但不要求逐字翻译。其他结构化字段可以继续使用英文枚举和简洁英文/中文混合描述，只要可解析、可审计。
 
 ## 评分辅助标准
 
