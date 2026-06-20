@@ -1,0 +1,37 @@
+# Example configuration for Stage D OpenCode agent review.
+#
+# Keep secrets out of this file. Put provider API keys in ignored auth.json:
+#
+# {
+#   "opencode_api_keys": {
+#     "d-reviewer": "..."
+#   }
+# }
+
+opencode:
+  provider_id: d-reviewer
+  provider_name: D Reviewer LLM
+  npm: "@ai-sdk/openai-compatible"
+  base_url: "https://your-openai-compatible-endpoint.example.com/v1"
+  model: "your-model-id"
+  agent_name: g4-reviewer
+  agent_prompt_path: templates/g4-reviewer-opencode.md
+  opencode_binary: opencode
+
+selection:
+  decisions:
+    - promote
+
+runtime:
+  concurrency: 1
+  max_items: 1
+  lease_seconds: 7200
+  timeout_seconds: 1200
+  max_attempts: 2
+
+paths:
+  candidate_cards_root: candidate_cards
+  card_run_name: "{date}-g4-screening"
+  workspace_root: workspaces/d-review
+  logs_dir: data/logs/d-review
+  mace_reference_path: /mnt/nvme0/zhujiayi/workspace/accel-trans-bench-private/tasks/mace-npu-migration

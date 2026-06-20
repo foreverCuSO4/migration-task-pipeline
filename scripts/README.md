@@ -253,3 +253,45 @@ python scripts/screen_local_repos_c2.py \
   --concurrency 16 \
   --dashboard
 ```
+
+## Stage D OpenCode Agent Review
+
+Run D after C2 has produced `runs/<run>/buffers/c2_to_d.sqlite`:
+
+```bash
+python scripts/review_candidates_d.py \
+  --run-root runs/<run> \
+  --auth-file auth.json
+```
+
+By default, D reads `configs/layer-d.example.yaml`, claims one pending
+`promote` candidate, and runs one OpenCode reviewer at a time. Put only the
+sensitive provider key in ignored `auth.json`:
+
+```json
+{
+  "opencode_api_keys": {
+    "d-reviewer": "..."
+  }
+}
+```
+
+Non-sensitive provider settings such as base URL and model live in
+`configs/layer-d.example.yaml`. The Python runner injects the API key into the
+OpenCode subprocess environment and does not place it on the command line.
+
+Default D outputs:
+
+```text
+candidate card: candidate_cards/YYYYMMDD-g4-screening/<owner>__<repo>.yaml
+workspace:      runs/<run>/workspaces/d-review/<owner>__<repo>/
+JSON trace:     runs/<run>/data/logs/d-review/<owner>__<repo>.jsonl
+text trace:     runs/<run>/data/logs/d-review/<owner>__<repo>.log
+stage log:      runs/<run>/data/logs/d-review/d-review-YYYYMMDD.log
+```
+
+The OpenCode reviewer is configured as read-only for files and is allowed to use
+web search/fetch. It is denied shell execution, edits, writes, subagents, LSP,
+skills, and user questions. The review workspace exposes the candidate checkout
+and local MACE reference task through symlinks, and OpenCode external-directory
+permissions are scoped to those two trees.
