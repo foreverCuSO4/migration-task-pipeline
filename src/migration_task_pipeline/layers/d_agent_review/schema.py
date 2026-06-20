@@ -73,6 +73,7 @@ def parse_and_validate_review_card(text: str) -> ValidatedReviewCard:
         raise ValueError("Review card verdict.status must be one of: pilot, hold, reject")
     if confidence not in VALID_CONFIDENCE:
         raise ValueError("Review card verdict.confidence must be one of: high, medium, low")
+    validate_overall_score(verdict.get("overall_score"))
     if not str(verdict.get("summary") or "").strip():
         raise ValueError("Review card verdict.summary is required")
 
@@ -99,6 +100,15 @@ def extract_yaml_document(text: str) -> str:
         return stripped[marker_index:].strip()
 
     return stripped
+
+
+def validate_overall_score(value: Any) -> None:
+    if isinstance(value, bool) or value is None:
+        raise ValueError("Review card verdict.overall_score must be a number from 0 to 100")
+    if not isinstance(value, int | float):
+        raise ValueError("Review card verdict.overall_score must be a number from 0 to 100")
+    if value < 0 or value > 100:
+        raise ValueError("Review card verdict.overall_score must be between 0 and 100")
 
 
 def normalize_yaml_text(payload: dict[str, Any]) -> str:

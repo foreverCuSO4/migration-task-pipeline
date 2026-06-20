@@ -311,6 +311,7 @@ repo:
 verdict:
   status: ""  # pilot | hold | reject
   confidence: ""  # high | medium | low
+  overall_score: null  # 0-100, overall suitability as a G4 migration task
   summary: ""
   main_reason: ""
 
@@ -424,7 +425,18 @@ Write `reviewer_notes.zh` in Chinese for fast human review. Write `reviewer_note
 
 ## Optional Scoring Aid
 
-You may internally score each axis from 0 to 4, but do not mechanically average them. `pilot` requires the key axes to clear the bar.
+You must provide `verdict.overall_score` from 0 to 100. This is the overall suitability score for turning the repository into a G4 migration task, not a score for how much CUDA it contains. Use the full rubric: executable migration surface, fixed interface, verifier control, reference feasibility, NPU evidence, hidden-case potential, setup/runtime manageability, benchmark value, and risk.
+
+Interpretation:
+
+- 90-100: exceptional candidate; strong evidence across all key axes and ready for manual task construction.
+- 75-89: strong candidate; likely pilot-worthy with manageable confirmation work.
+- 60-74: plausible candidate; meaningful potential but one or more important risks or unknowns remain.
+- 40-59: weak or uncertain candidate; hold only if targeted probes could resolve key blockers.
+- 20-39: poor candidate; major missing contract/reference/evidence/manageability pieces.
+- 0-19: unsuitable; no credible path to a bounded, verifiable G4 task.
+
+You may internally score each axis from 0 to 4, but do not mechanically average them. `pilot` requires the key axes to clear the bar, and a high `overall_score` must be backed by concrete evidence.
 
 ```text
 executable_migration_surface: 0-4

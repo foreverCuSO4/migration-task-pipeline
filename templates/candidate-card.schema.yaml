@@ -11,6 +11,7 @@ repo:
 verdict:
   status: ""  # pilot | hold | reject
   confidence: ""  # high | medium | low
+  overall_score: null  # 0-100, overall suitability as a G4 migration task
   summary: ""
   main_reason: ""
 

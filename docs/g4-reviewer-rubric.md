@@ -311,6 +311,7 @@ repo:
 verdict:
   status: ""  # pilot | hold | reject
   confidence: ""  # high | medium | low
+  overall_score: null  # 0-100，作为 G4 迁移题目的总体适配分
   summary: ""
   main_reason: ""
 
@@ -424,7 +425,18 @@ open_questions:
 
 ## 评分辅助标准
 
-Reviewer 可以在内部按 0-4 分评估各轴，但最终不要机械平均。`pilot` 需要关键轴都过线。
+Reviewer 必须给出 `verdict.overall_score`，范围是 0-100。这个分数表示“该仓库被构造成 G4 迁移题目的总体适配度”，不是 CUDA keyword 多不多。评分应综合 executable migration surface、fixed interface、verifier control、reference feasibility、NPU evidence、hidden-case potential、setup/runtime manageability、benchmark value 和风险。
+
+解释：
+
+- 90-100：极强候选；关键轴证据充分，可直接进入人工 task construction。
+- 75-89：强候选；大概率值得 pilot，只需少量确认。
+- 60-74：有潜力；但仍有一个或多个关键风险或未知项。
+- 40-59：弱或不确定；只有明确 probe 能解决 blocker 时才适合 hold。
+- 20-39：较差候选；contract/reference/evidence/manageability 有明显缺口。
+- 0-19：不适合；缺少可信的 bounded/verifiable G4 task 路径。
+
+Reviewer 可以在内部按 0-4 分评估各轴，但最终不要机械平均。`pilot` 需要关键轴都过线，高 `overall_score` 必须由具体证据支撑。
 
 ```text
 executable_migration_surface: 0-4

@@ -295,3 +295,48 @@ web search/fetch. It is denied shell execution, edits, writes, subagents, LSP,
 skills, and user questions. The review workspace exposes the candidate checkout
 and local MACE reference task through symlinks, and OpenCode external-directory
 permissions are scoped to those two trees.
+
+## Buffer Reset Utility
+
+Use the buffer reset utility when a debugging run has incorrectly marked items
+as completed or failed. It only edits the selected SQLite buffer; it does not
+delete candidate cards, logs, workspaces, local repositories, or CSV/JSONL
+artifacts.
+
+Interactive mode:
+
+```bash
+python scripts/reset_buffer_items.py \
+  --run-root runs/<run> \
+  --buffer c2_to_d
+```
+
+The tool prints status counts, asks for filters, previews matching rows, and
+requires a confirmation phrase before changing anything. The default status
+filter is `done`, so a blank interactive selection resets only completed items.
+
+Dry-run a single repository:
+
+```bash
+python scripts/reset_buffer_items.py \
+  --run-root runs/<run> \
+  --buffer c2_to_d \
+  --status done \
+  --repo-key enlite-ai/maze \
+  --dry-run
+```
+
+Reset that repository without prompts:
+
+```bash
+python scripts/reset_buffer_items.py \
+  --run-root runs/<run> \
+  --buffer c2_to_d \
+  --status done \
+  --repo-key enlite-ai/maze \
+  --yes
+```
+
+Resetting sets selected rows back to `pending`, clears worker/lease fields and
+`last_error`, and resets `attempts` to `0` unless `--keep-attempts` is used. To
+include every status instead of the default `done`, pass `--status all`.

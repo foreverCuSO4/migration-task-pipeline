@@ -108,6 +108,7 @@ repo:
 verdict:
   status: hold
   confidence: medium
+  overall_score: 62
   summary: "Potential candidate, needs probe."
   main_reason: "Static evidence suggests a fixed interface may exist."
 project_summary:
@@ -249,6 +250,18 @@ def test_parse_and_validate_review_card_accepts_valid_yaml():
 
     assert card.payload["schema_version"] == "g4_review.v1"
     assert card.payload["verdict"]["status"] == "hold"
+    assert card.payload["verdict"]["overall_score"] == 62
+
+
+def test_parse_and_validate_review_card_requires_overall_score():
+    invalid = valid_review_yaml().replace("  overall_score: 62\n", "")
+
+    try:
+        parse_and_validate_review_card(invalid)
+    except ValueError as exc:
+        assert "overall_score" in str(exc)
+    else:
+        raise AssertionError("missing overall_score should fail validation")
 
 
 def test_d_pipeline_writes_card_logs_and_marks_done(tmp_path):
