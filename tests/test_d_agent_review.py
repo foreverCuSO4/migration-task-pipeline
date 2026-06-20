@@ -67,10 +67,11 @@ def make_layer_d_config(tmp_path: Path, *, max_items: int | None = 1) -> LayerDC
         ),
         runtime=DRuntimeConfig(concurrency=1, max_items=max_items, timeout_seconds=30, max_attempts=1),
         paths=DPathConfig(
-            candidate_cards_root=str(tmp_path / "candidate_cards"),
+            candidate_cards_root="candidate_cards",
             card_run_name="{date}-test",
             workspace_root=str(tmp_path / "workspaces"),
             logs_dir=str(tmp_path / "logs"),
+            rubric_path=str(tmp_path / "rubric.en.md"),
             mace_reference_path=str(tmp_path / "mace"),
         ),
     )
@@ -88,6 +89,11 @@ def make_mace(path: Path) -> Path:
     (path / "instruction.md").write_text("MACE instruction\n", encoding="utf-8")
     (path / "provenance.lock").write_text("locked\n", encoding="utf-8")
     (path / "tests" / "evaluate.py").write_text("print('evaluate')\n", encoding="utf-8")
+    return path
+
+
+def make_rubric(path: Path) -> Path:
+    path.write_text("# G4 Reviewer Rubric\n\nFull rubric for tests.\n", encoding="utf-8")
     return path
 
 
@@ -212,6 +218,7 @@ opencode:
     assert config.runtime.concurrency == 1
     assert config.runtime.max_items == 1
     assert config.selection.decisions == ["promote"]
+    assert config.paths.rubric_path == "docs/g4-reviewer/rubric.en.md"
 
 
 def test_build_opencode_request_keeps_api_key_out_of_command(tmp_path):
@@ -231,6 +238,8 @@ def test_build_opencode_request_keeps_api_key_out_of_command(tmp_path):
     )
 
     assert "secret-key" not in " ".join(request.command)
+    assert Path(request.command[request.command.index("--dir") + 1]).is_absolute()
+    assert request.cwd.is_absolute()
     assert request.env["MTP_OPENCODE_API_KEY"] == "secret-key"
     assert "{env:MTP_OPENCODE_API_KEY}" in request.env["OPENCODE_CONFIG_CONTENT"]
 
@@ -246,6 +255,7 @@ def test_d_pipeline_writes_card_logs_and_marks_done(tmp_path):
     run_root = tmp_path / "runs" / "example"
     repo = make_repo(tmp_path / "repo")
     make_mace(tmp_path / "mace")
+    make_rubric(tmp_path / "rubric.en.md")
     (tmp_path / "prompt.md").write_text("review prompt", encoding="utf-8")
     auth_file = tmp_path / "auth.json"
     auth_file.write_text(json.dumps({"opencode_api_keys": {"d-reviewer": "secret-key"}}), encoding="utf-8")
@@ -262,8 +272,9 @@ def test_d_pipeline_writes_card_logs_and_marks_done(tmp_path):
 
     assert outputs.claimed_count == 1
     assert outputs.reviewed_count == 1
+    assert outputs.requeued_count == 0
     assert buffer.counts_by_status() == {"done": 1}
-    cards = list((tmp_path / "candidate_cards").glob("*/*.yaml"))
+    cards = list((run_root / "candidate_cards").glob("*/*.yaml"))
     assert len(cards) == 1
     assert "schema_version: g4_review.v1" in cards[0].read_text(encoding="utf-8")
     assert (tmp_path / "logs" / "owner__repo.jsonl").exists()
@@ -272,13 +283,16 @@ def test_d_pipeline_writes_card_logs_and_marks_done(tmp_path):
     workspace = tmp_path / "workspaces" / "owner__repo"
     assert (workspace / "candidate_repo").is_symlink()
     assert (workspace / "mace_reference").is_symlink()
+    assert (workspace / "rubric.en.md").read_text(encoding="utf-8").startswith("# G4 Reviewer Rubric")
     assert fake.requests
+    assert "rubric.en.md and review-input.json first" in fake.requests[0].command[-1]
 
 
 def test_d_pipeline_defaults_do_not_process_maybe(tmp_path):
     run_root = tmp_path / "runs" / "example"
     repo = make_repo(tmp_path / "repo")
     make_mace(tmp_path / "mace")
+    make_rubric(tmp_path / "rubric.en.md")
     (tmp_path / "prompt.md").write_text("review prompt", encoding="utf-8")
     auth_file = tmp_path / "auth.json"
     auth_file.write_text(json.dumps({"opencode_api_keys": {"d-reviewer": "secret-key"}}), encoding="utf-8")

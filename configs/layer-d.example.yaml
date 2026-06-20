@@ -30,8 +30,10 @@ runtime:
   max_attempts: 2
 
 paths:
+  # Relative paths are resolved under --run-root unless explicitly absolute.
   candidate_cards_root: candidate_cards
   card_run_name: "{date}-g4-screening"
   workspace_root: workspaces/d-review
   logs_dir: data/logs/d-review
+  rubric_path: docs/g4-reviewer/rubric.en.md
   mace_reference_path: /mnt/nvme0/zhujiayi/workspace/accel-trans-bench-private/tasks/mace-npu-migration

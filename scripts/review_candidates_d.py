@@ -76,6 +76,7 @@ def main() -> int:
     print(f"claimed repos: {outputs.claimed_count}")
     print(f"reviewed repos: {outputs.reviewed_count}")
     print(f"failed repos: {outputs.failed_count}")
+    print(f"requeued repos: {outputs.requeued_count}")
     print(f"skipped repos: {outputs.skipped_count}")
     print(f"input buffer: {outputs.input_buffer}")
     print(f"workspace root: {outputs.workspace_root}")

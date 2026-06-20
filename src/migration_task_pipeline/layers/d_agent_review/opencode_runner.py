@@ -71,6 +71,7 @@ def build_opencode_request(
     if not api_key:
         raise RuntimeError("Layer D OpenCode API key is empty")
 
+    workspace_path = Path(workspace_dir).resolve()
     full_model = f"{config.provider_id}/{config.model}"
     inline_config = build_opencode_inline_config(
         config=config,
@@ -93,7 +94,7 @@ def build_opencode_request(
         "--model",
         full_model,
         "--dir",
-        str(Path(workspace_dir)),
+        str(workspace_path),
         "--format",
         "json",
         prompt_text,
@@ -101,7 +102,7 @@ def build_opencode_request(
     return OpenCodeRequest(
         command=command,
         env=env,
-        cwd=Path(workspace_dir),
+        cwd=workspace_path,
         timeout_seconds=timeout_seconds,
         display_command=list(command),
     )

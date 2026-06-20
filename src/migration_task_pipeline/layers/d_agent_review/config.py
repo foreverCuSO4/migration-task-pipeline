@@ -52,6 +52,7 @@ class DPathConfig:
     card_run_name: str = "{date}-g4-screening"
     workspace_root: str = "workspaces/d-review"
     logs_dir: str = "data/logs/d-review"
+    rubric_path: str = "docs/g4-reviewer/rubric.en.md"
     mace_reference_path: str = DEFAULT_MACE_REFERENCE_PATH
 
 
@@ -109,6 +110,7 @@ def load_layer_d_config(path: str | Path) -> LayerDConfig:
         card_run_name=as_str(paths_raw.get("card_run_name"), default_paths.card_run_name),
         workspace_root=as_str(paths_raw.get("workspace_root"), default_paths.workspace_root),
         logs_dir=as_str(paths_raw.get("logs_dir"), default_paths.logs_dir),
+        rubric_path=as_str(paths_raw.get("rubric_path"), default_paths.rubric_path),
         mace_reference_path=as_str(paths_raw.get("mace_reference_path"), default_paths.mace_reference_path),
     )
     return LayerDConfig(opencode=opencode, selection=selection, runtime=runtime, paths=paths)

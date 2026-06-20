@@ -40,6 +40,7 @@ class DReviewPaths:
     candidate_cards_dir: Path
     stage_log_file: Path
     mace_reference_path: Path
+    rubric_path: Path
     agent_prompt_path: Path
 
 
@@ -53,6 +54,7 @@ class DReviewOutputs:
     claimed_count: int
     reviewed_count: int
     failed_count: int
+    requeued_count: int
     skipped_count: int
 
 
@@ -124,6 +126,7 @@ class RunCounters:
         self.claimed_count = 0
         self.reviewed_count = 0
         self.failed_count = 0
+        self.requeued_count = 0
         self.skipped_count = 0
         self._lock = threading.Lock()
 
@@ -146,6 +149,10 @@ class RunCounters:
         with self._lock:
             self.failed_count += 1
 
+    def record_requeued(self) -> None:
+        with self._lock:
+            self.requeued_count += 1
+
     def record_skipped(self) -> None:
         with self._lock:
             self.skipped_count += 1
@@ -157,6 +164,7 @@ class RunCounters:
                 "claimed_count": self.claimed_count,
                 "reviewed_count": self.reviewed_count,
                 "failed_count": self.failed_count,
+                "requeued_count": self.requeued_count,
                 "skipped_count": self.skipped_count,
             }
 
@@ -259,6 +267,7 @@ def run_d_agent_review(
         claimed_count=counters.claimed_count,
         reviewed_count=counters.reviewed_count,
         failed_count=counters.failed_count,
+        requeued_count=counters.requeued_count,
         skipped_count=counters.skipped_count,
     )
 
@@ -315,6 +324,7 @@ def worker_loop(
             error = str(exc)
             if int(item.get("attempts") or 0) < config.runtime.max_attempts:
                 queue.requeue_pending(str(item["item_id"]), error=error, priority=int(item["priority"]))
+                counters.record_requeued()
                 logger.write(
                     "item_requeued",
                     {"worker_id": worker_id, "item_id": item["item_id"], "repo_key": repo_key_value, "error": error},
@@ -365,6 +375,7 @@ def review_one_item(
         item=item,
         repo_path=repo_path,
         mace_reference_path=paths.mace_reference_path,
+        rubric_path=paths.rubric_path,
         review_input=review_input,
     )
     card_path = paths.candidate_cards_dir / f"{slug}.yaml"
@@ -392,6 +403,7 @@ def review_one_item(
                 "workspace": str(workspace.root),
                 "candidate_repo": str(repo_path),
                 "mace_reference": str(paths.mace_reference_path),
+                "rubric": str(paths.rubric_path),
                 "card_path": str(card_path),
                 "command": request.display_command,
                 "provider_id": config.opencode.provider_id,
@@ -507,6 +519,7 @@ def build_review_input(*, item: dict[str, Any], run_id: str, repo_path: Path) ->
         "evidence": item.get("evidence_json") or {},
         "output_schema": "g4_review.v1",
         "required_verdicts": ["pilot", "hold", "reject"],
+        "required_workspace_reads": ["rubric.en.md", "review-input.json", "candidate_repo/", "mace_reference/"],
     }
 
 
@@ -536,9 +549,10 @@ def resolve_d_paths(
         input_buffer=Path(input_buffer) if input_buffer is not None else root / "buffers" / "c2_to_d.sqlite",
         workspace_root=resolve_run_relative(root, config.paths.workspace_root),
         logs_dir=resolve_run_relative(root, config.paths.logs_dir),
-        candidate_cards_dir=Path(config.paths.candidate_cards_root) / candidate_run_name,
+        candidate_cards_dir=resolve_run_relative(root, config.paths.candidate_cards_root) / candidate_run_name,
         stage_log_file=resolve_run_relative(root, config.paths.logs_dir) / f"d-review-{date}.log",
         mace_reference_path=Path(config.paths.mace_reference_path),
+        rubric_path=Path(config.paths.rubric_path),
         agent_prompt_path=Path(config.opencode.agent_prompt_path),
     )
 
@@ -551,7 +565,7 @@ def resolve_run_relative(run_root: Path, value: str) -> Path:
 def build_user_prompt(repo_key_value: str) -> str:
     return (
         f"Review candidate repository {repo_key_value}. "
-        "Read review-input.json first, then inspect candidate_repo/ and mace_reference/. "
+        "Read rubric.en.md and review-input.json first, then inspect candidate_repo/ and mace_reference/. "
         "Output only one YAML object matching schema_version: g4_review.v1."
     )
 

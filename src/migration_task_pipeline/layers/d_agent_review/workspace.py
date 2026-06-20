@@ -16,6 +16,7 @@ class ReviewWorkspace:
     root: Path
     candidate_link: Path
     mace_link: Path
+    rubric_file: Path
     input_json: Path
     readme: Path
     repo_slug: str
@@ -34,6 +35,7 @@ def create_review_workspace(
     item: dict[str, Any],
     repo_path: str | Path,
     mace_reference_path: str | Path,
+    rubric_path: str | Path,
     review_input: dict[str, Any],
 ) -> ReviewWorkspace:
     repo_key_value = str(item.get("repo_key") or review_input.get("repo_key") or "")
@@ -41,16 +43,21 @@ def create_review_workspace(
     root = Path(workspace_root) / slug
     candidate_path = Path(repo_path).resolve()
     mace_path = Path(mace_reference_path).resolve()
+    source_rubric_path = Path(rubric_path).resolve()
     if not candidate_path.is_dir():
         raise FileNotFoundError(f"Candidate repository path does not exist: {candidate_path}")
     if not mace_path.is_dir():
         raise FileNotFoundError(f"MACE reference path does not exist: {mace_path}")
+    if not source_rubric_path.is_file():
+        raise FileNotFoundError(f"G4 reviewer rubric file does not exist: {source_rubric_path}")
 
     root.mkdir(parents=True, exist_ok=True)
     candidate_link = root / "candidate_repo"
     mace_link = root / "mace_reference"
+    rubric_file = root / "rubric.en.md"
     ensure_directory_symlink(candidate_path, candidate_link)
     ensure_directory_symlink(mace_path, mace_link)
+    shutil.copyfile(source_rubric_path, rubric_file)
 
     input_json = root / "review-input.json"
     readme = root / "README.md"
@@ -65,6 +72,7 @@ def create_review_workspace(
         root=root,
         candidate_link=candidate_link,
         mace_link=mace_link,
+        rubric_file=rubric_file,
         input_json=input_json,
         readme=readme,
         repo_slug=slug,
@@ -95,6 +103,7 @@ Repository: {repo_key_value}
 Files:
 
 - `review-input.json`: metadata, C2 scores, C2 evidence, and output requirements.
+- `rubric.en.md`: complete G4 reviewer rubric. Read and follow it first.
 - `candidate_repo/`: symlink to the candidate repository checkout.
 - `mace_reference/`: symlink to the local MACE G4 reference task.
 

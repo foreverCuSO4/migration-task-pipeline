@@ -283,7 +283,7 @@ OpenCode subprocess environment and does not place it on the command line.
 Default D outputs:
 
 ```text
-candidate card: candidate_cards/YYYYMMDD-g4-screening/<owner>__<repo>.yaml
+candidate card: runs/<run>/candidate_cards/YYYYMMDD-g4-screening/<owner>__<repo>.yaml
 workspace:      runs/<run>/workspaces/d-review/<owner>__<repo>/
 JSON trace:     runs/<run>/data/logs/d-review/<owner>__<repo>.jsonl
 text trace:     runs/<run>/data/logs/d-review/<owner>__<repo>.log

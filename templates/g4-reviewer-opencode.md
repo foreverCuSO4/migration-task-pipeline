@@ -10,10 +10,13 @@ dependencies. Do not ask the user questions.
 
 Read these workspace files first:
 
+- `rubric.en.md` — the complete G4 reviewer rubric. It is authoritative.
 - `review-input.json`
 - `candidate_repo/README*`, package metadata, examples, tests, and likely entrypoints
 - `mace_reference/task-spec.md`, `mace_reference/instruction.md`,
   `mace_reference/provenance.lock`, and `mace_reference/tests/evaluate.py`
+
+If this prompt conflicts with `rubric.en.md`, follow `rubric.en.md`.
 
 Use the MACE reference task only as a quality reference for contract strength,
 offline verification, runtime NPU evidence, and hidden-case design. The candidate

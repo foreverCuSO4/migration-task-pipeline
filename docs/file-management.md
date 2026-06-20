@@ -55,19 +55,19 @@ Templates for:
 - reviewer reports
 - task construction checklists
 
-### `candidate_cards/`
+### `runs/<run>/candidate_cards/`
 
-Agent-generated candidate cards.
+Agent-generated candidate cards for a pipeline run.
 
 Recommended layout:
 
 ```text
-candidate_cards/
+runs/<run>/candidate_cards/
   YYYYMMDD-run-name/
     owner__repo.yaml
 ```
 
-Generated cards may be numerous. Commit curated subsets or run manifests first; decide later whether to version all cards.
+Generated cards may be numerous and should stay with the run artifacts by default. Commit curated subsets or run manifests first; decide later whether to version all cards.
 
 ### `registry/`
 
