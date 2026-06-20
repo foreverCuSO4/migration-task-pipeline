@@ -12,8 +12,8 @@ opencode:
   provider_id: d-reviewer
   provider_name: D Reviewer LLM
   npm: "@ai-sdk/openai-compatible"
-  base_url: "https://your-openai-compatible-endpoint.example.com/v1"
-  model: "your-model-id"
+  base_url: "http://8.130.30.251:8801/v1"
+  model: "deepseek-v4-pro"
   agent_name: g4-reviewer
   agent_prompt_path: templates/g4-reviewer-opencode.md
   opencode_binary: opencode
